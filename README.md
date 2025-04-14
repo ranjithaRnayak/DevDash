@@ -1,12 +1,26 @@
-# React + Vite
+# 🚀 DevDash – Developer Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**DevDash** is a lightweight developer productivity dashboard that brings together API data, project metrics, and daily dev tools into a clean UI. Built with a modern full stack approach and integrated with future-ready CI/CD planning.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 🛠️ Tech Stack
 
-## Expanding the ESLint configuration
+- **Frontend**: React.js, Axios
+- **Styling**: CSS Modules
+- **State Management**: React Context API
+- **API Integration**: RESTful API support
+- **Deployment Ready**: Azure App Service / Vercel (configurable)
 
-If you are developing a production application, we recommend using TypeScript and enable type-aware lint rules. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+---
+
+## 📦 Features
+
+- 📊 Customizable dashboard with dev-centric widgets
+- 🔐 Environment variable support via `.env`
+- ⚙️ Scalable structure ready for CI/CD integration
+- 📁 Modular architecture for adding new services or APIs
+
+---
+
+## 📂 Folder Structure (Simplified)
