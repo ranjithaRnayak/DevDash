@@ -3,14 +3,12 @@ import React, { useEffect, useState } from 'react';
 
 // SonarQube configuration from environment
 const SONAR_CONFIG = {
-  // Use proxy in dev to avoid CORS, backend API in production
-  baseUrl: import.meta.env.VITE_API_BASE_URL
-    ? `${import.meta.env.VITE_API_BASE_URL}/sonarqube`
-    : '/sonar', // Vite proxy for development
+  // Always use Vite proxy in dev to avoid CORS (configured in vite.config.js)
+  // The proxy forwards /sonar/* to your SonarQube server
+  proxyUrl: '/sonar',
   projectKey: import.meta.env.VITE_SONARCUBE_REPO || '',
   token: import.meta.env.VITE_SONAR_TOKEN || '',
   isConfigured: !!(import.meta.env.VITE_SONARCUBE_URL && import.meta.env.VITE_SONARCUBE_REPO),
-  useProxy: !import.meta.env.VITE_API_BASE_URL, // Use Vite proxy if no backend configured
 };
 
 // Mock data for when SonarQube is not configured
@@ -47,25 +45,17 @@ const CodeQuality = () => {
       }
 
       try {
-        // Build the API URL based on configuration
-        let apiUrl;
-        let headers = {
+        // Use Vite proxy to avoid CORS - proxy configured in vite.config.js
+        const apiUrl = `${SONAR_CONFIG.proxyUrl}/api/measures/component?component=${encodeURIComponent(SONAR_CONFIG.projectKey)}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,alert_status`;
+
+        const headers = {
           'Accept': 'application/json',
         };
 
-        if (SONAR_CONFIG.useProxy) {
-          // Using Vite proxy - add auth header
-          // Note: In production, use backend API to avoid exposing token
-          apiUrl = `/sonar/api/measures/component?component=${encodeURIComponent(SONAR_CONFIG.projectKey)}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,alert_status`;
-
-          if (SONAR_CONFIG.token) {
-            // SonarQube uses Basic auth with token as username, empty password
-            headers['Authorization'] = `Basic ${btoa(SONAR_CONFIG.token + ':')}`;
-          }
-        } else {
-          // Using backend API (recommended for production)
-          apiUrl = `${SONAR_CONFIG.baseUrl}/metrics?projectKey=${encodeURIComponent(SONAR_CONFIG.projectKey)}`;
-          // Backend will handle authentication
+        // Add authentication if token is provided (required for private projects)
+        if (SONAR_CONFIG.token) {
+          // SonarQube uses Basic auth with token as username, empty password
+          headers['Authorization'] = `Basic ${btoa(SONAR_CONFIG.token + ':')}`;
         }
 
         const response = await fetch(apiUrl, { headers });
