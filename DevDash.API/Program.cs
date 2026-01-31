@@ -96,6 +96,28 @@ builder.Services.AddHttpClient<IGitHubService, GitHubService>(client =>
 });
 
 // ============================================
+// Performance Service (User-specific DevOps data)
+// ============================================
+
+builder.Services.AddHttpClient("AzureDevOps", client =>
+{
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
+builder.Services.AddHttpClient("GitHub", client =>
+{
+    client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
+    client.DefaultRequestHeaders.Add("User-Agent", "DevDash-API");
+});
+
+builder.Services.AddHttpClient("MicrosoftGraph", client =>
+{
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
+builder.Services.AddScoped<IPerformanceService, PerformanceService>();
+
+// ============================================
 // Health Checks
 // ============================================
 
