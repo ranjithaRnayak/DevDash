@@ -1,76 +1,42 @@
-// components/PerformanceCard.jsx - Personal Developer Dashboard
-// All API calls go through backend to protect sensitive tokens
-import React, { useEffect, useState, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useEffect, useState } from 'react';
+import axios from 'axios';
 
-// API base URL - all calls go through backend
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const PerformanceCard = () => {
-    const { user } = useAuth();
     const [draftPRs, setDraftPRs] = useState([]);
     const [recentCommits, setRecentCommits] = useState([]);
     const [storyPoints, setStoryPoints] = useState({ notStarted: 0, total: 0, items: [] });
     const [currentUser, setCurrentUser] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [activeTab, setActiveTab] = useState('drafts');
-    const [selectedPR, setSelectedPR] = useState(null);
     const [schedulingMeeting, setSchedulingMeeting] = useState(false);
 
-    // Get auth token from context/storage
-    const getAuthToken = useCallback(() => {
-        return localStorage.getItem('auth_token') || '';
-    }, []);
-
-    // Fetch helper with auth header
-    const fetchWithAuth = useCallback(async (endpoint) => {
-        const token = getAuthToken();
-        const response = await fetch(`${API_BASE}${endpoint}`, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-        });
-
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        return response.json();
-    }, [getAuthToken]);
-
-    // Fetch all dashboard data
     useEffect(() => {
         const fetchDashboardData = async () => {
             setLoading(true);
-            setError(null);
-
             try {
-                // Fetch all data from backend (single endpoint or parallel calls)
-                const dashboardData = await fetchWithAuth('/performance/dashboard');
+                // Fetch all data from backend
+                const response = await axios.get(`${API_BASE_URL}/performance/dashboard`);
+                const data = response.data || {};
 
-                setCurrentUser(dashboardData.user);
-                setDraftPRs(dashboardData.draftPRs || []);
-                setRecentCommits(dashboardData.recentCommits || []);
-                setStoryPoints(dashboardData.storyPoints || { notStarted: 0, total: 0, items: [] });
-            } catch (err) {
-                console.error('Failed to fetch dashboard data:', err);
-                setError(err.message);
-
-                // Try fetching individual endpoints as fallback
+                setCurrentUser(data.user);
+                setDraftPRs(data.draftPRs || []);
+                setRecentCommits(data.recentCommits || []);
+                setStoryPoints(data.storyPoints || { notStarted: 0, total: 0, items: [] });
+            } catch (error) {
+                console.error('Failed to fetch dashboard data:', error);
+                // Try individual endpoints as fallback
                 try {
-                    const [drafts, commits, points] = await Promise.allSettled([
-                        fetchWithAuth('/performance/draft-prs'),
-                        fetchWithAuth('/performance/commits'),
-                        fetchWithAuth('/performance/story-points'),
+                    const [draftsRes, commitsRes, pointsRes] = await Promise.allSettled([
+                        axios.get(`${API_BASE_URL}/performance/draft-prs`),
+                        axios.get(`${API_BASE_URL}/performance/commits`),
+                        axios.get(`${API_BASE_URL}/performance/story-points`),
                     ]);
 
-                    if (drafts.status === 'fulfilled') setDraftPRs(drafts.value || []);
-                    if (commits.status === 'fulfilled') setRecentCommits(commits.value || []);
-                    if (points.status === 'fulfilled') setStoryPoints(points.value || { notStarted: 0, total: 0, items: [] });
-
-                    setError(null);
+                    if (draftsRes.status === 'fulfilled') setDraftPRs(draftsRes.value.data || []);
+                    if (commitsRes.status === 'fulfilled') setRecentCommits(commitsRes.value.data || []);
+                    if (pointsRes.status === 'fulfilled') setStoryPoints(pointsRes.value.data || { notStarted: 0, total: 0, items: [] });
                 } catch (fallbackErr) {
                     console.error('Fallback fetch failed:', fallbackErr);
                 }
@@ -80,13 +46,10 @@ const PerformanceCard = () => {
         };
 
         fetchDashboardData();
-    }, [fetchWithAuth]);
+    }, []);
 
-    // Schedule Code Review via Microsoft Graph (backend handles the API call)
     const handleScheduleCodeReview = async (pr = null) => {
-        const targetPR = pr || selectedPR;
-
-        if (!targetPR) {
+        if (!pr) {
             // No PR selected - open Teams meeting creation directly
             const teamsUrl = 'https://teams.microsoft.com/l/meeting/new?subject=' +
                 encodeURIComponent('Code Review Session');
@@ -97,50 +60,40 @@ const PerformanceCard = () => {
         setSchedulingMeeting(true);
 
         try {
-            const token = getAuthToken();
-            const response = await fetch(`${API_BASE}/performance/schedule-review`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    prId: targetPR.id,
-                    prTitle: targetPR.title,
-                    prUrl: targetPR.url,
-                    repoName: targetPR.repoName,
-                    reviewers: targetPR.reviewers?.map(r => ({
-                        displayName: r.displayName,
-                        email: r.email,
-                    })) || [],
-                }),
+            const response = await axios.post(`${API_BASE_URL}/performance/schedule-review`, {
+                prId: pr.id,
+                prTitle: pr.title,
+                prUrl: pr.url,
+                repoName: pr.repoName,
+                reviewers: pr.reviewers?.map(r => ({
+                    displayName: r.displayName,
+                    email: r.email,
+                })) || [],
             });
 
-            const result = await response.json();
+            const result = response.data;
 
             if (result.success && result.meetingUrl) {
                 window.open(result.meetingUrl, '_blank', 'noopener,noreferrer');
             } else {
                 // Fallback to deep link
-                const subject = encodeURIComponent(`Code Review – PR #${targetPR.id}`);
-                const body = encodeURIComponent(`Code review for: ${targetPR.title}\nPR Link: ${targetPR.url}`);
+                const subject = encodeURIComponent(`Code Review – PR #${pr.id}`);
+                const body = encodeURIComponent(`Code review for: ${pr.title}\nPR Link: ${pr.url}`);
                 const teamsUrl = `https://teams.microsoft.com/l/meeting/new?subject=${subject}&content=${body}`;
                 window.open(teamsUrl, '_blank', 'noopener,noreferrer');
             }
         } catch (err) {
             console.error('Failed to schedule meeting:', err);
             // Fallback to Teams deep link
-            const subject = encodeURIComponent(`Code Review – PR #${targetPR.id}`);
-            const body = encodeURIComponent(`Code review for: ${targetPR.title}\nPR Link: ${targetPR.url}`);
+            const subject = encodeURIComponent(`Code Review – PR #${pr.id}`);
+            const body = encodeURIComponent(`Code review for: ${pr.title}\nPR Link: ${pr.url}`);
             const teamsUrl = `https://teams.microsoft.com/l/meeting/new?subject=${subject}&content=${body}`;
             window.open(teamsUrl, '_blank', 'noopener,noreferrer');
         } finally {
             setSchedulingMeeting(false);
-            setSelectedPR(null);
         }
     };
 
-    // Format relative time
     const formatRelativeTime = (dateStr) => {
         const date = new Date(dateStr);
         const now = new Date();
@@ -155,7 +108,6 @@ const PerformanceCard = () => {
         return date.toLocaleDateString();
     };
 
-    // Get source badge color
     const getSourceColor = (source) => {
         return source === 'GitHub' ? '#238636' : '#0078d4';
     };
@@ -168,19 +120,6 @@ const PerformanceCard = () => {
                     <div className="spinner"></div>
                     <p>Loading your data...</p>
                 </div>
-                <style>{`
-                    .loading-state { text-align: center; padding: 20px; }
-                    .spinner {
-                        width: 30px;
-                        height: 30px;
-                        border: 3px solid rgba(59, 130, 246, 0.2);
-                        border-top-color: #3b82f6;
-                        border-radius: 50%;
-                        animation: spin 0.8s linear infinite;
-                        margin: 0 auto 10px;
-                    }
-                    @keyframes spin { to { transform: rotate(360deg); } }
-                `}</style>
             </div>
         );
     }
@@ -208,12 +147,6 @@ const PerformanceCard = () => {
                     {schedulingMeeting ? 'Scheduling...' : 'Schedule Code Review'}
                 </button>
             </div>
-
-            {error && (
-                <div className="error-banner">
-                    <span>⚠️</span> {error}
-                </div>
-            )}
 
             {/* Story Points Summary */}
             <div className="story-points-banner">
@@ -267,7 +200,7 @@ const PerformanceCard = () => {
                             draftPRs.map((pr) => (
                                 <div
                                     key={`${pr.source}-${pr.id}`}
-                                    className={`perf-item ${selectedPR?.id === pr.id ? 'selected' : ''}`}
+                                    className="perf-item"
                                 >
                                     <div
                                         className="item-content"
@@ -380,369 +313,6 @@ const PerformanceCard = () => {
                     </div>
                 )}
             </div>
-
-            <style>{`
-                .performance-card {
-                    position: relative;
-                }
-
-                .perf-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 16px;
-                    flex-wrap: wrap;
-                    gap: 12px;
-                }
-
-                .perf-header h2 {
-                    margin: 0;
-                }
-
-                .user-badge {
-                    font-size: 12px;
-                    padding: 4px 10px;
-                    background: rgba(59, 130, 246, 0.15);
-                    border: 1px solid rgba(59, 130, 246, 0.3);
-                    border-radius: 12px;
-                    color: #60a5fa;
-                    cursor: help;
-                }
-
-                .error-banner {
-                    padding: 8px 12px;
-                    background: rgba(239, 68, 68, 0.15);
-                    border: 1px solid rgba(239, 68, 68, 0.3);
-                    border-radius: 6px;
-                    color: #fca5a5;
-                    font-size: 12px;
-                    margin-bottom: 16px;
-                }
-
-                .schedule-btn {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    padding: 8px 16px;
-                    background: linear-gradient(135deg, #6366f1, #8b5cf6);
-                    border: none;
-                    border-radius: 8px;
-                    color: white;
-                    font-size: 13px;
-                    font-weight: 500;
-                    cursor: pointer;
-                    transition: all 0.3s ease;
-                    margin-left: auto;
-                }
-
-                .schedule-btn:hover:not(:disabled) {
-                    transform: translateY(-2px);
-                    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
-                }
-
-                .schedule-btn:disabled {
-                    opacity: 0.6;
-                    cursor: not-allowed;
-                }
-
-                .schedule-btn:active:not(:disabled) {
-                    transform: translateY(0);
-                }
-
-                .story-points-banner {
-                    display: flex;
-                    align-items: center;
-                    gap: 16px;
-                    padding: 16px;
-                    background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.05));
-                    border: 1px solid rgba(245, 158, 11, 0.3);
-                    border-radius: 12px;
-                    margin-bottom: 16px;
-                }
-
-                .sp-icon {
-                    color: #f59e0b;
-                }
-
-                .sp-info {
-                    display: flex;
-                    flex-direction: column;
-                    flex: 1;
-                }
-
-                .sp-value {
-                    font-size: 28px;
-                    font-weight: 700;
-                    color: #f59e0b;
-                }
-
-                .sp-label {
-                    font-size: 12px;
-                    color: #94a3b8;
-                }
-
-                .sp-count {
-                    font-size: 12px;
-                    color: #64748b;
-                    padding: 4px 10px;
-                    background: rgba(255, 255, 255, 0.05);
-                    border-radius: 12px;
-                }
-
-                .perf-tabs {
-                    display: flex;
-                    gap: 8px;
-                    margin-bottom: 16px;
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                    padding-bottom: 12px;
-                }
-
-                .tab-btn {
-                    padding: 8px 16px;
-                    background: transparent;
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 8px;
-                    color: #94a3b8;
-                    font-size: 13px;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                }
-
-                .tab-btn:hover {
-                    background: rgba(255, 255, 255, 0.05);
-                    color: #e2e8f0;
-                }
-
-                .tab-btn.active {
-                    background: rgba(59, 130, 246, 0.2);
-                    border-color: #3b82f6;
-                    color: #3b82f6;
-                }
-
-                .perf-scroll {
-                    max-height: 350px;
-                    overflow-y: auto;
-                    padding-right: 6px;
-                    scrollbar-width: thin;
-                    scrollbar-color: #3b82f6 #1a1e2e;
-                }
-
-                .perf-scroll::-webkit-scrollbar {
-                    width: 6px;
-                }
-
-                .perf-scroll::-webkit-scrollbar-thumb {
-                    background-color: #3b82f6;
-                    border-radius: 10px;
-                }
-
-                .perf-scroll::-webkit-scrollbar-track {
-                    background: #1a1e2e;
-                }
-
-                .tab-content {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 12px;
-                }
-
-                .perf-item {
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 8px;
-                    padding: 12px;
-                    background: rgba(0, 0, 0, 0.2);
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                    border-radius: 10px;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                }
-
-                .perf-item:hover {
-                    transform: translateY(-2px);
-                    border-color: rgba(59, 130, 246, 0.4);
-                    box-shadow: 0 4px 15px rgba(59, 130, 246, 0.1);
-                }
-
-                .perf-item.selected {
-                    border-color: rgba(99, 102, 241, 0.6);
-                    background: rgba(99, 102, 241, 0.1);
-                }
-
-                .item-content {
-                    flex: 1;
-                    min-width: 0;
-                }
-
-                .item-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: flex-start;
-                    gap: 12px;
-                    margin-bottom: 8px;
-                }
-
-                .item-title {
-                    font-size: 14px;
-                    font-weight: 500;
-                    color: #e2e8f0;
-                    line-height: 1.4;
-                    flex: 1;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    display: -webkit-box;
-                    -webkit-line-clamp: 2;
-                    -webkit-box-orient: vertical;
-                }
-
-                .commit-hash {
-                    font-family: 'Fira Code', 'Consolas', monospace;
-                    font-size: 12px;
-                    padding: 2px 8px;
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 4px;
-                    color: #94a3b8;
-                }
-
-                .commit-message {
-                    font-size: 13px;
-                    color: #e2e8f0;
-                    margin-bottom: 8px;
-                    line-height: 1.4;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                }
-
-                .source-badge {
-                    font-size: 10px;
-                    padding: 3px 8px;
-                    border-radius: 12px;
-                    color: white;
-                    font-weight: 500;
-                    white-space: nowrap;
-                }
-
-                .sp-badge {
-                    font-size: 11px;
-                    padding: 3px 8px;
-                    background: rgba(245, 158, 11, 0.2);
-                    border: 1px solid rgba(245, 158, 11, 0.4);
-                    border-radius: 12px;
-                    color: #f59e0b;
-                    font-weight: 600;
-                    white-space: nowrap;
-                }
-
-                .item-meta {
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 12px;
-                    font-size: 11px;
-                    color: #64748b;
-                }
-
-                .reviewers-list {
-                    display: flex;
-                    align-items: center;
-                    gap: 6px;
-                    margin-top: 8px;
-                    flex-wrap: wrap;
-                }
-
-                .reviewers-label {
-                    font-size: 11px;
-                    color: #64748b;
-                }
-
-                .reviewer-badge {
-                    font-size: 10px;
-                    padding: 2px 6px;
-                    background: rgba(255, 255, 255, 0.08);
-                    border-radius: 4px;
-                    color: #94a3b8;
-                }
-
-                .reviewer-more {
-                    font-size: 10px;
-                    color: #64748b;
-                }
-
-                .schedule-pr-btn {
-                    padding: 6px;
-                    background: rgba(99, 102, 241, 0.2);
-                    border: 1px solid rgba(99, 102, 241, 0.3);
-                    border-radius: 6px;
-                    color: #818cf8;
-                    cursor: pointer;
-                    transition: all 0.2s ease;
-                    flex-shrink: 0;
-                }
-
-                .schedule-pr-btn:hover {
-                    background: rgba(99, 102, 241, 0.3);
-                    border-color: rgba(99, 102, 241, 0.5);
-                    color: #a5b4fc;
-                }
-
-                .work-item-type {
-                    padding: 2px 6px;
-                    background: rgba(99, 102, 241, 0.2);
-                    border-radius: 4px;
-                    color: #818cf8;
-                }
-
-                .work-item-state {
-                    padding: 2px 6px;
-                    background: rgba(34, 197, 94, 0.2);
-                    border-radius: 4px;
-                    color: #22c55e;
-                }
-
-                .empty-state {
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 40px 20px;
-                    color: #64748b;
-                }
-
-                .empty-icon {
-                    font-size: 32px;
-                    margin-bottom: 12px;
-                }
-
-                .empty-state p {
-                    margin: 0;
-                    font-size: 14px;
-                }
-
-                @media (max-width: 600px) {
-                    .perf-header {
-                        flex-direction: column;
-                        align-items: flex-start;
-                    }
-
-                    .schedule-btn {
-                        margin-left: 0;
-                    }
-
-                    .perf-tabs {
-                        flex-wrap: wrap;
-                    }
-
-                    .tab-btn {
-                        flex: 1;
-                        min-width: fit-content;
-                        text-align: center;
-                    }
-
-                    .story-points-banner {
-                        flex-wrap: wrap;
-                    }
-                }
-            `}</style>
         </div>
     );
 };
