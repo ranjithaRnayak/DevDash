@@ -1,7 +1,7 @@
 // Protected Route Component - Guards routes that require authentication
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import Login from './Login';
+import Login from './Login.jsx';
 
 // Debug: Log what Login is
 console.log('Login import:', typeof Login, Login);
