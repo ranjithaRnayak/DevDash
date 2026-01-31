@@ -6,13 +6,24 @@ import { getAuthFlags, setGitHubConnected } from '../config/featureFlags';
 const AUTH_TOKEN_KEY = 'devdash_auth_token';
 const AUTH_USER_KEY = 'devdash_auth_user';
 const GITHUB_PAT_KEY = 'devdash_github_pat';
+const GITHUB_TOKEN_KEY = 'devdash_github_oauth_token';
 
-// Entra ID configuration
+// Entra ID configuration from environment variables
 const ENTRA_CONFIG = {
   clientId: import.meta.env.VITE_ENTRA_CLIENT_ID || '',
   tenantId: import.meta.env.VITE_ENTRA_TENANT_ID || '',
-  redirectUri: `${window.location.origin}/auth/callback`,
-  scopes: ['openid', 'profile', 'email', 'User.Read'],
+  redirectUri: import.meta.env.VITE_ENTRA_REDIRECT_URI || `${window.location.origin}/auth/callback`,
+  authorizeUrl: import.meta.env.VITE_ENTRA_AUTHORIZE_URL || 'https://login.microsoftonline.com',
+  scopes: (import.meta.env.VITE_ENTRA_SCOPES || 'openid,profile,email,User.Read').split(','),
+};
+
+// GitHub OAuth configuration from environment variables
+const GITHUB_CONFIG = {
+  clientId: import.meta.env.VITE_GITHUB_CLIENT_ID || '',
+  redirectUri: import.meta.env.VITE_GITHUB_REDIRECT_URI || `${window.location.origin}/auth/github/callback`,
+  authorizeUrl: import.meta.env.VITE_GITHUB_AUTHORIZE_URL || 'https://github.com/login/oauth/authorize',
+  apiUrl: import.meta.env.VITE_GITHUB_API_URL || 'https://api.github.com',
+  scopes: (import.meta.env.VITE_GITHUB_SCOPES || 'read:user,repo').split(','),
 };
 
 // Backend API URL
@@ -75,7 +86,7 @@ class AuthService {
       nonce: this.generateNonce(),
     });
 
-    return `https://login.microsoftonline.com/${ENTRA_CONFIG.tenantId}/oauth2/v2.0/authorize?${params.toString()}`;
+    return `${ENTRA_CONFIG.authorizeUrl}/${ENTRA_CONFIG.tenantId}/oauth2/v2.0/authorize?${params.toString()}`;
   }
 
   async initiateEntraIDLogin() {
@@ -155,6 +166,7 @@ class AuthService {
 
   isGitHubConnected() {
     return !!localStorage.getItem(GITHUB_PAT_KEY) ||
+           !!localStorage.getItem(GITHUB_TOKEN_KEY) ||
            localStorage.getItem('devdash_github_connected') === 'true';
   }
 
@@ -162,10 +174,125 @@ class AuthService {
     return localStorage.getItem(GITHUB_PAT_KEY);
   }
 
+  getGitHubToken() {
+    return localStorage.getItem(GITHUB_TOKEN_KEY) || localStorage.getItem(GITHUB_PAT_KEY);
+  }
+
+  getGitHubConnectionMethod() {
+    return localStorage.getItem('devdash_github_connection_method');
+  }
+
+  // ==================== GitHub OAuth (Redirect-based flow) ====================
+
+  getGitHubOAuthUrl() {
+    const state = this.generateState();
+    sessionStorage.setItem('github_oauth_state', state);
+
+    const params = new URLSearchParams({
+      client_id: GITHUB_CONFIG.clientId,
+      redirect_uri: GITHUB_CONFIG.redirectUri,
+      scope: GITHUB_CONFIG.scopes.join(' '),
+      state: state,
+    });
+
+    return `${GITHUB_CONFIG.authorizeUrl}?${params.toString()}`;
+  }
+
+  async initiateGitHubOAuth() {
+    // In demo/dev mode without GitHub config, simulate the OAuth
+    if (!GITHUB_CONFIG.clientId || import.meta.env.VITE_APP_ENV === 'dev') {
+      return this.simulateGitHubOAuth();
+    }
+
+    // Redirect to GitHub OAuth
+    window.location.href = this.getGitHubOAuthUrl();
+  }
+
+  async handleGitHubOAuthCallback(code, state) {
+    // Verify state to prevent CSRF
+    const storedState = sessionStorage.getItem('github_oauth_state');
+    if (state !== storedState) {
+      throw new Error('Invalid state - possible CSRF attack');
+    }
+    sessionStorage.removeItem('github_oauth_state');
+
+    try {
+      // Exchange code for token via backend
+      const response = await fetch(`${API_BASE_URL}/auth/github/oauth/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.getStoredToken()}`,
+        },
+        body: JSON.stringify({ code, redirectUri: GITHUB_CONFIG.redirectUri }),
+      });
+
+      if (!response.ok) {
+        throw new Error('GitHub OAuth token exchange failed');
+      }
+
+      const data = await response.json();
+
+      // Store GitHub OAuth token
+      localStorage.setItem(GITHUB_TOKEN_KEY, data.accessToken);
+      setGitHubConnected(true, 'oauth');
+
+      // Update user with GitHub info
+      const currentUser = this.getStoredUser();
+      if (currentUser) {
+        currentUser.githubUsername = data.githubUser.login;
+        currentUser.githubAvatar = data.githubUser.avatarUrl;
+        currentUser.githubConnected = true;
+        currentUser.githubConnectionMethod = 'oauth';
+        localStorage.setItem(AUTH_USER_KEY, JSON.stringify(currentUser));
+      }
+
+      return {
+        success: true,
+        githubUser: data.githubUser,
+      };
+    } catch (error) {
+      console.error('GitHub OAuth callback failed:', error);
+      throw error;
+    }
+  }
+
+  async simulateGitHubOAuth() {
+    // Simulate network delay
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    const mockGitHubUser = {
+      login: 'demo-github-user',
+      avatarUrl: 'https://github.com/identicons/demo.png',
+      name: 'Demo GitHub User',
+    };
+
+    // Store simulated token
+    localStorage.setItem(GITHUB_TOKEN_KEY, 'mock_github_oauth_token');
+    setGitHubConnected(true, 'oauth');
+
+    // Update user with GitHub info
+    const currentUser = this.getStoredUser();
+    if (currentUser) {
+      currentUser.githubUsername = mockGitHubUser.login;
+      currentUser.githubAvatar = mockGitHubUser.avatarUrl;
+      currentUser.githubConnected = true;
+      currentUser.githubConnectionMethod = 'oauth';
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(currentUser));
+    }
+
+    return {
+      success: true,
+      githubUser: mockGitHubUser,
+    };
+  }
+
+  // ==================== GitHub PAT Connection ====================
+
   async connectGitHubWithPAT(pat) {
     // Validate PAT by making a test request
     try {
-      const response = await fetch('https://api.github.com/user', {
+      const response = await fetch(`${GITHUB_CONFIG.apiUrl}/user`, {
         headers: {
           Authorization: `Bearer ${pat}`,
           Accept: 'application/vnd.github+json',
@@ -180,7 +307,7 @@ class AuthService {
 
       // Store PAT and mark as connected
       localStorage.setItem(GITHUB_PAT_KEY, pat);
-      setGitHubConnected(true);
+      setGitHubConnected(true, 'pat');
 
       // Update user with GitHub info
       const currentUser = this.getStoredUser();
@@ -188,6 +315,7 @@ class AuthService {
         currentUser.githubUsername = githubUser.login;
         currentUser.githubAvatar = githubUser.avatar_url;
         currentUser.githubConnected = true;
+        currentUser.githubConnectionMethod = 'pat';
         localStorage.setItem(AUTH_USER_KEY, JSON.stringify(currentUser));
       }
 
@@ -207,6 +335,7 @@ class AuthService {
 
   disconnectGitHub() {
     localStorage.removeItem(GITHUB_PAT_KEY);
+    localStorage.removeItem(GITHUB_TOKEN_KEY);
     setGitHubConnected(false);
 
     // Update user to remove GitHub info
@@ -215,6 +344,7 @@ class AuthService {
       delete currentUser.githubUsername;
       delete currentUser.githubAvatar;
       currentUser.githubConnected = false;
+      delete currentUser.githubConnectionMethod;
       localStorage.setItem(AUTH_USER_KEY, JSON.stringify(currentUser));
     }
 

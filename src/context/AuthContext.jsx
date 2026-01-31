@@ -73,13 +73,48 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // Connect GitHub with PAT
-  const connectGitHub = useCallback(async (pat) => {
+  const connectGitHubWithPAT = useCallback(async (pat) => {
     setError(null);
 
     try {
       const result = await authService.connectGitHubWithPAT(pat);
       setGithubConnected(true);
       // Update user state with GitHub info
+      const updatedUser = await authService.getCurrentUser();
+      setUser(updatedUser);
+      return result;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  // Connect GitHub with OAuth (redirect-based flow)
+  const connectGitHubWithOAuth = useCallback(async () => {
+    setError(null);
+
+    try {
+      const result = await authService.initiateGitHubOAuth();
+      // If we get here (simulated mode), the OAuth was successful
+      if (result) {
+        setGithubConnected(true);
+        const updatedUser = await authService.getCurrentUser();
+        setUser(updatedUser);
+      }
+      return result;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }, []);
+
+  // Handle GitHub OAuth callback
+  const handleGitHubOAuthCallback = useCallback(async (code, state) => {
+    setError(null);
+
+    try {
+      const result = await authService.handleGitHubOAuthCallback(code, state);
+      setGithubConnected(true);
       const updatedUser = await authService.getCurrentUser();
       setUser(updatedUser);
       return result;
@@ -145,7 +180,9 @@ export const AuthProvider = ({ children }) => {
     // Actions
     loginWithEntraID,
     handleEntraIDCallback,
-    connectGitHub,
+    connectGitHubWithPAT,
+    connectGitHubWithOAuth,
+    handleGitHubOAuthCallback,
     disconnectGitHub,
     logout,
     refreshToken,
