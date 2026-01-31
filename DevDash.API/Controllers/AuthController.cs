@@ -120,4 +120,148 @@ public class AuthController : ControllerBase
         public bool EnablePRAlerts { get; set; }
         public bool UsePATToken { get; set; }
     }
+
+    /// <summary>
+    /// Connect GitHub using Personal Access Token
+    /// </summary>
+    [HttpPost("github/connect")]
+    [RequiredScope("access_as_user")]
+    public async Task<ActionResult<GitHubConnectionResponse>> ConnectGitHub([FromBody] GitHubConnectRequest request)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrEmpty(request.PersonalAccessToken))
+        {
+            return BadRequest(new { error = "Personal Access Token is required" });
+        }
+
+        try
+        {
+            // Validate PAT with GitHub API
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {request.PersonalAccessToken}");
+            httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
+            httpClient.DefaultRequestHeaders.Add("User-Agent", "DevDash-API");
+
+            var response = await httpClient.GetAsync("https://api.github.com/user");
+            if (!response.IsSuccessStatusCode)
+            {
+                return BadRequest(new { error = "Invalid GitHub Personal Access Token" });
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            var gitHubUser = System.Text.Json.JsonSerializer.Deserialize<GitHubUserResponse>(content,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            // Store GitHub connection in cache (in production, store in database)
+            await _cacheService.SetAsync($"github:{userId}", new GitHubConnection
+            {
+                UserId = userId,
+                GitHubUsername = gitHubUser?.Login ?? "",
+                GitHubId = gitHubUser?.Id.ToString() ?? "",
+                ConnectedAt = DateTime.UtcNow,
+                TokenHash = ComputeTokenHash(request.PersonalAccessToken)
+            }, TimeSpan.FromDays(30));
+
+            _logger.LogInformation("User {UserId} connected GitHub account {GitHubUsername}", userId, gitHubUser?.Login);
+
+            return Ok(new GitHubConnectionResponse
+            {
+                Connected = true,
+                GitHubUsername = gitHubUser?.Login ?? "",
+                AvatarUrl = gitHubUser?.AvatarUrl ?? ""
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to connect GitHub for user {UserId}", userId);
+            return StatusCode(500, new { error = "Failed to connect GitHub" });
+        }
+    }
+
+    /// <summary>
+    /// Disconnect GitHub integration
+    /// </summary>
+    [HttpPost("github/disconnect")]
+    [RequiredScope("access_as_user")]
+    public async Task<ActionResult> DisconnectGitHub()
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        await _cacheService.RemoveAsync($"github:{userId}");
+        _logger.LogInformation("User {UserId} disconnected GitHub account", userId);
+
+        return Ok(new { success = true });
+    }
+
+    /// <summary>
+    /// Get GitHub connection status
+    /// </summary>
+    [HttpGet("github/status")]
+    [RequiredScope("access_as_user")]
+    public async Task<ActionResult<GitHubConnectionResponse>> GetGitHubStatus()
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized();
+        }
+
+        var connection = await _cacheService.GetAsync<GitHubConnection>($"github:{userId}");
+        if (connection == null)
+        {
+            return Ok(new GitHubConnectionResponse { Connected = false });
+        }
+
+        return Ok(new GitHubConnectionResponse
+        {
+            Connected = true,
+            GitHubUsername = connection.GitHubUsername,
+            AvatarUrl = ""
+        });
+    }
+
+    private static string ComputeTokenHash(string token)
+    {
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(token);
+        var hash = sha256.ComputeHash(bytes);
+        return Convert.ToBase64String(hash);
+    }
+
+    public class GitHubConnectRequest
+    {
+        public string PersonalAccessToken { get; set; } = string.Empty;
+    }
+
+    public class GitHubConnectionResponse
+    {
+        public bool Connected { get; set; }
+        public string GitHubUsername { get; set; } = string.Empty;
+        public string AvatarUrl { get; set; } = string.Empty;
+    }
+
+    public class GitHubUserResponse
+    {
+        public int Id { get; set; }
+        public string Login { get; set; } = string.Empty;
+        public string AvatarUrl { get; set; } = string.Empty;
+    }
+
+    public class GitHubConnection
+    {
+        public string UserId { get; set; } = string.Empty;
+        public string GitHubUsername { get; set; } = string.Empty;
+        public string GitHubId { get; set; } = string.Empty;
+        public DateTime ConnectedAt { get; set; }
+        public string TokenHash { get; set; } = string.Empty;
+    }
 }

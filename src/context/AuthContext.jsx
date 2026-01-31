@@ -1,7 +1,8 @@
 // Auth Context - React Context for Authentication State Management
+// Microsoft Entra ID as primary auth, GitHub as optional integration
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import authService from '../services/authService';
-import { isDualAuthEnabled, getAuthFlags } from '../config/featureFlags';
+import { getAuthFlags, isGitHubConnectedFlag } from '../config/featureFlags';
 
 // Create the Auth Context
 const AuthContext = createContext(null);
@@ -11,7 +12,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [authMethod, setAuthMethod] = useState(null);
+  const [githubConnected, setGithubConnected] = useState(false);
 
   // Initialize auth state from storage
   useEffect(() => {
@@ -19,9 +20,8 @@ export const AuthProvider = ({ children }) => {
       try {
         if (authService.isAuthenticated()) {
           const storedUser = await authService.getCurrentUser();
-          const storedMethod = authService.getAuthMethod();
           setUser(storedUser);
-          setAuthMethod(storedMethod);
+          setGithubConnected(authService.isGitHubConnected());
         }
       } catch (err) {
         console.error('Failed to initialize auth:', err);
@@ -34,15 +34,17 @@ export const AuthProvider = ({ children }) => {
     initializeAuth();
   }, []);
 
-  // Login with email/password
-  const loginWithEmail = useCallback(async (email, password, rememberMe = false) => {
+  // Login with Entra ID
+  const loginWithEntraID = useCallback(async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const result = await authService.loginWithEmail(email, password, rememberMe);
-      setUser(result.user);
-      setAuthMethod(result.method);
+      const result = await authService.initiateEntraIDLogin();
+      if (result) {
+        setUser(result.user);
+        setGithubConnected(authService.isGitHubConnected());
+      }
       return result;
     } catch (err) {
       setError(err.message);
@@ -52,15 +54,15 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  // Register with email/password
-  const registerWithEmail = useCallback(async (email, password, name) => {
+  // Handle Entra ID callback
+  const handleEntraIDCallback = useCallback(async (code, state) => {
     setLoading(true);
     setError(null);
 
     try {
-      const result = await authService.registerWithEmail(email, password, name);
+      const result = await authService.handleEntraIDCallback(code, state);
       setUser(result.user);
-      setAuthMethod(result.method);
+      setGithubConnected(authService.isGitHubConnected());
       return result;
     } catch (err) {
       setError(err.message);
@@ -70,40 +72,31 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  // Login with OAuth provider
-  const loginWithOAuth = useCallback(async (provider) => {
-    setLoading(true);
+  // Connect GitHub with PAT
+  const connectGitHub = useCallback(async (pat) => {
     setError(null);
 
     try {
-      const result = await authService.simulateOAuthLogin(provider);
-      setUser(result.user);
-      setAuthMethod(result.method);
+      const result = await authService.connectGitHubWithPAT(pat);
+      setGithubConnected(true);
+      // Update user state with GitHub info
+      const updatedUser = await authService.getCurrentUser();
+      setUser(updatedUser);
       return result;
     } catch (err) {
       setError(err.message);
       throw err;
-    } finally {
-      setLoading(false);
     }
   }, []);
 
-  // Handle OAuth callback
-  const handleOAuthCallback = useCallback(async (provider, code, state) => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const result = await authService.handleOAuthCallback(provider, code, state);
-      setUser(result.user);
-      setAuthMethod(result.method);
-      return result;
-    } catch (err) {
-      setError(err.message);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
+  // Disconnect GitHub
+  const disconnectGitHub = useCallback(() => {
+    authService.disconnectGitHub();
+    setGithubConnected(false);
+    // Update user state without GitHub info
+    const updatedUser = authService.getStoredUser();
+    setUser(updatedUser);
+    return { success: true };
   }, []);
 
   // Logout
@@ -114,24 +107,12 @@ export const AuthProvider = ({ children }) => {
     try {
       await authService.logout();
       setUser(null);
-      setAuthMethod(null);
+      // Note: GitHub connection status is preserved
     } catch (err) {
       setError(err.message);
       throw err;
     } finally {
       setLoading(false);
-    }
-  }, []);
-
-  // Request password reset
-  const requestPasswordReset = useCallback(async (email) => {
-    setError(null);
-
-    try {
-      return await authService.requestPasswordReset(email);
-    } catch (err) {
-      setError(err.message);
-      throw err;
     }
   }, []);
 
@@ -151,32 +132,24 @@ export const AuthProvider = ({ children }) => {
     setError(null);
   }, []);
 
-  // Get available auth methods
-  const getAvailableAuthMethods = useCallback(() => {
-    return authService.getAvailableAuthMethods();
-  }, []);
-
   // Context value
   const value = {
     // State
     user,
     loading,
     error,
-    authMethod,
     isAuthenticated: !!user,
-    isDualAuthEnabled: isDualAuthEnabled(),
+    githubConnected,
     authFlags: getAuthFlags(),
 
     // Actions
-    loginWithEmail,
-    registerWithEmail,
-    loginWithOAuth,
-    handleOAuthCallback,
+    loginWithEntraID,
+    handleEntraIDCallback,
+    connectGitHub,
+    disconnectGitHub,
     logout,
-    requestPasswordReset,
     refreshToken,
     clearError,
-    getAvailableAuthMethods,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
