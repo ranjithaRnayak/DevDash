@@ -1,70 +1,55 @@
 // Protected Route Component - Guards routes that require authentication
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
+import Login from './Login';
 
-// Lazy load Login to avoid potential circular dependency
-const Login = React.lazy(() => import('./Login'));
-
-// Loading fallback component
-const LoadingFallback = () => (
-  <div className="protected-loading">
-    <div className="loading-content">
-      <div className="loading-spinner" />
-      <p>Loading...</p>
-    </div>
-    <style>{`
-      .protected-loading {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-      }
-
-      .loading-content {
-        text-align: center;
-      }
-
-      .loading-content .loading-spinner {
-        width: 40px;
-        height: 40px;
-        border: 3px solid rgba(34, 197, 94, 0.2);
-        border-top-color: #22c55e;
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-        margin: 0 auto 16px;
-      }
-
-      .loading-content p {
-        color: #94a3b8;
-        font-size: 16px;
-        margin: 0;
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-    `}</style>
-  </div>
-);
+// Debug: Log what Login is
+console.log('Login import:', typeof Login, Login);
 
 const ProtectedRoute = ({ children, requiredRole = null }) => {
   const { isAuthenticated, user, loading } = useAuth();
 
   // Show loading state while checking authentication
   if (loading) {
-    return <LoadingFallback />;
+    return (
+      <div className="protected-loading">
+        <div className="loading-content">
+          <div className="loading-spinner" />
+          <p>Loading...</p>
+        </div>
+        <style>{`
+          .protected-loading {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+          }
+          .loading-content { text-align: center; }
+          .loading-content .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(34, 197, 94, 0.2);
+            border-top-color: #22c55e;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+          }
+          .loading-content p { color: #94a3b8; font-size: 16px; margin: 0; }
+          @keyframes spin { to { transform: rotate(360deg); } }
+        `}</style>
+      </div>
+    );
   }
 
   // If not authenticated, show login page
   if (!isAuthenticated) {
-    return (
-      <React.Suspense fallback={<LoadingFallback />}>
-        <Login />
-      </React.Suspense>
-    );
+    // Debug: Check if Login is a valid component
+    if (typeof Login !== 'function') {
+      console.error('Login is not a function:', typeof Login, Login);
+      return <div>Login component error - check console</div>;
+    }
+    return <Login />;
   }
 
   // If a specific role is required, check for it
