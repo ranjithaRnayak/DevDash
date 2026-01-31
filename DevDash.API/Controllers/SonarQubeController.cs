@@ -142,10 +142,134 @@ public class SonarQubeController : ControllerBase
     }
 
     /// <summary>
+    /// Get metrics for multiple SonarQube projects
+    /// </summary>
+    [HttpGet("projects")]
+    public async Task<ActionResult<List<SonarQubeMetricsResponse>>> GetAllProjects([FromQuery] string? projectKeys = null)
+    {
+        var sonarUrl = _configuration["SonarQube:Url"];
+        var sonarToken = _configuration["SonarQube:Token"];
+        var configuredProjects = _configuration["SonarQube:Projects"]?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            ?? _configuration["SonarQube:DefaultProjectKey"]?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            ?? Array.Empty<string>();
+
+        // Use provided projectKeys or fall back to configured projects
+        var keys = !string.IsNullOrEmpty(projectKeys)
+            ? projectKeys.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(k => k.Trim())
+            : configuredProjects.Select(k => k.Trim());
+
+        if (!keys.Any())
+        {
+            return Ok(new List<SonarQubeMetricsResponse>());
+        }
+
+        if (string.IsNullOrEmpty(sonarUrl))
+        {
+            return StatusCode(500, new { error = "SonarQube is not configured" });
+        }
+
+        var results = new List<SonarQubeMetricsResponse>();
+        var client = _httpClientFactory.CreateClient();
+
+        if (!string.IsNullOrEmpty(sonarToken))
+        {
+            var authBytes = Encoding.ASCII.GetBytes($"{sonarToken}:");
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(authBytes));
+        }
+
+        foreach (var projectKey in keys)
+        {
+            try
+            {
+                var metricKeys = "bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,alert_status";
+                var requestUrl = $"{sonarUrl}/api/measures/component?component={Uri.EscapeDataString(projectKey)}&metricKeys={metricKeys}";
+
+                var response = await client.GetAsync(requestUrl);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    results.Add(new SonarQubeMetricsResponse
+                    {
+                        ProjectKey = projectKey,
+                        ProjectName = projectKey,
+                        Error = $"API error: {response.StatusCode}"
+                    });
+                    continue;
+                }
+
+                var content = await response.Content.ReadAsStringAsync();
+                var sonarResponse = System.Text.Json.JsonSerializer.Deserialize<SonarQubeApiResponse>(content,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                var metrics = new SonarQubeMetricsResponse
+                {
+                    ProjectKey = projectKey,
+                    ProjectName = sonarResponse?.Component?.Name ?? projectKey
+                };
+
+                if (sonarResponse?.Component?.Measures != null)
+                {
+                    foreach (var measure in sonarResponse.Component.Measures)
+                    {
+                        switch (measure.Metric)
+                        {
+                            case "bugs":
+                                metrics.Bugs = int.TryParse(measure.Value, out var bugs) ? bugs : 0;
+                                break;
+                            case "vulnerabilities":
+                                metrics.Vulnerabilities = int.TryParse(measure.Value, out var vulns) ? vulns : 0;
+                                break;
+                            case "code_smells":
+                                metrics.CodeSmells = int.TryParse(measure.Value, out var smells) ? smells : 0;
+                                break;
+                            case "coverage":
+                                metrics.Coverage = double.TryParse(measure.Value, out var cov) ? cov : 0;
+                                break;
+                            case "duplicated_lines_density":
+                                metrics.Duplications = double.TryParse(measure.Value, out var dup) ? dup : 0;
+                                break;
+                            case "alert_status":
+                                metrics.QualityGateStatus = measure.Value ?? "UNKNOWN";
+                                break;
+                        }
+                    }
+                }
+
+                results.Add(metrics);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch metrics for project {ProjectKey}", projectKey);
+                results.Add(new SonarQubeMetricsResponse
+                {
+                    ProjectKey = projectKey,
+                    ProjectName = projectKey,
+                    Error = ex.Message
+                });
+            }
+        }
+
+        return Ok(results);
+    }
+
+    /// <summary>
+    /// Get SonarQube base URL for frontend links
+    /// </summary>
+    [HttpGet("config")]
+    public ActionResult<SonarQubeConfigResponse> GetConfig()
+    {
+        return Ok(new SonarQubeConfigResponse
+        {
+            BaseUrl = _configuration["SonarQube:Url"] ?? "",
+            IsConfigured = !string.IsNullOrEmpty(_configuration["SonarQube:Url"])
+        });
+    }
+
+    /// <summary>
     /// Get quality gate status for a project
     /// </summary>
     [HttpGet("quality-gate")]
-    [RequiredScope("access_as_user")]
     public async Task<ActionResult<QualityGateResponse>> GetQualityGate([FromQuery] string projectKey)
     {
         if (string.IsNullOrEmpty(projectKey))
@@ -207,6 +331,7 @@ public class SonarQubeController : ControllerBase
     public class SonarQubeMetricsResponse
     {
         public string ProjectKey { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
         public int Bugs { get; set; }
         public int Vulnerabilities { get; set; }
         public int CodeSmells { get; set; }
@@ -216,6 +341,13 @@ public class SonarQubeController : ControllerBase
         public string ReliabilityRating { get; set; } = "E";
         public string SecurityRating { get; set; } = "E";
         public string MaintainabilityRating { get; set; } = "E";
+        public string? Error { get; set; }
+    }
+
+    public class SonarQubeConfigResponse
+    {
+        public string BaseUrl { get; set; } = string.Empty;
+        public bool IsConfigured { get; set; }
     }
 
     public class QualityGateResponse

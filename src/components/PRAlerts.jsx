@@ -1,84 +1,115 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+// PRAlerts.jsx - Active Pull Requests Dashboard
+// All API calls go through backend to protect sensitive tokens
+import React, { useEffect, useState, useCallback } from 'react';
+
+// API base URL - all calls go through backend
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const PRAlerts = () => {
     const [allPRs, setAllPRs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    // Get auth token from storage
+    const getAuthToken = useCallback(() => {
+        return localStorage.getItem('auth_token') || '';
+    }, []);
 
     useEffect(() => {
         const fetchPRs = async () => {
-            const githubToken = import.meta.env.VITE_GITHUB_PAT;
-            const azureToken = import.meta.env.VITE_AZDO_PAT;
-            const azureOrg = import.meta.env.VITE_AZDO_ORG_URL;
-            const azureProject = import.meta.env.VITE_AZDO_PROJECT;
-            const azureRepos = import.meta.env.VITE_AZDO_REPOS?.split(',');
-            const githubOrg = import.meta.env.VITE_GITHUB_OWNER;
+            setLoading(true);
+            setError(null);
 
-            const headers = {
-                github: {
-                    Authorization: `Bearer ${githubToken}`,
-                    Accept: 'application/vnd.github+json',
-                },
-                azure: {
-                    Authorization: `Basic ${btoa(':' + azureToken)}`,
-                },
-            };
-
-            const combinedPRs = [];
-
-            // 🔷 Azure PRs
-            for (const repo of azureRepos) {
-                try {
-                    const res = await axios.get(
-                        `${azureOrg}/${azureProject}/_apis/git/repositories/${repo}/pullrequests?searchCriteria.status=active&$top=50&api-version=7.0`,
-                        { headers: headers.azure }
-                    );
-                    const published = res.data.value.filter((pr) => !pr.isDraft);
-                    published.forEach((pr) =>
-                        combinedPRs.push({
-                            title: pr.title,
-                            repoName: pr.repository?.name,
-                            author: pr.createdBy?.displayName,
-                            createdAt: pr.creationDate,
-                            source: 'Azure',
-                        })
-                    );
-                } catch (err) {
-                    console.warn('Azure PR error:', err);
-                }
-            }
-
-            // 🐙 GitHub PRs
             try {
-                const res = await axios.get(
-                    githubOrg,
-                    { headers: headers.github }
-                );
-                res.data.forEach((pr) =>
-                    combinedPRs.push({
-                        title: pr.title,
-                        repoName: import.meta.env.VITE_GITHUB_REPO,
-                        author: pr.user?.login,
-                        createdAt: pr.created_at,
-                        source: 'GitHub',
-                    })
-                );
-            } catch (err) {
-                console.warn('GitHub PR error:', err);
-            }
+                const token = getAuthToken();
+                const response = await fetch(`${API_BASE}/devops/pullrequests?status=open`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
 
-            // 🔄 Sort by createdAt DESC
-            const sorted = combinedPRs.sort(
-                (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-            );
-            setAllPRs(sorted);
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                // Filter out drafts and transform to expected format
+                const activePRs = (data || [])
+                    .filter(pr => pr.status !== 'Draft')
+                    .map(pr => ({
+                        id: pr.id,
+                        title: pr.title,
+                        repoName: pr.sourceBranch?.split('/').pop() || 'Unknown',
+                        author: pr.author,
+                        createdAt: pr.createdAt,
+                        url: pr.url,
+                        source: pr.source === 'AzureDevOps' ? 'Azure' : pr.source,
+                        reviewers: pr.reviewers || [],
+                    }))
+                    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+                setAllPRs(activePRs);
+            } catch (err) {
+                console.error('Failed to fetch PRs:', err);
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
         };
 
         fetchPRs();
-    }, []);
+    }, [getAuthToken]);
+
+    // Format relative time
+    const formatRelativeTime = (dateStr) => {
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffHours = diffMs / (1000 * 60 * 60);
+
+        if (diffHours < 1) return `${Math.floor(diffMs / 60000)}m ago`;
+        if (diffHours < 24) return `${Math.floor(diffHours)}h ago`;
+        if (diffHours < 168) return `${Math.floor(diffHours / 24)}d ago`;
+        return date.toLocaleDateString();
+    };
+
+    if (loading) {
+        return (
+            <div className="pr-alerts-card">
+                <h2>Active Pull Requests</h2>
+                <div className="loading-state">
+                    <div className="spinner"></div>
+                    <p>Loading PRs...</p>
+                </div>
+                <style>{`
+                    .loading-state { text-align: center; padding: 20px; }
+                    .spinner {
+                        width: 30px;
+                        height: 30px;
+                        border: 3px solid rgba(59, 130, 246, 0.2);
+                        border-top-color: #3b82f6;
+                        border-radius: 50%;
+                        animation: spin 0.8s linear infinite;
+                        margin: 0 auto 10px;
+                    }
+                    @keyframes spin { to { transform: rotate(360deg); } }
+                `}</style>
+            </div>
+        );
+    }
 
     return (
         <div className="pr-alerts-card">
-            <h2>🧵 Active Pull Requests</h2>
+            <h2>Active Pull Requests</h2>
+
+            {error && (
+                <div className="error-banner">
+                    <span>⚠️</span> {error}
+                </div>
+            )}
+
             <div className="pr-scroll">
                 {allPRs.length === 0 ? (
                     <p>No Active PRs found.</p>
@@ -87,35 +118,35 @@ const PRAlerts = () => {
                         const created = new Date(pr.createdAt);
                         const hoursOpen = (Date.now() - created.getTime()) / (1000 * 60 * 60);
                         const isOverdue = hoursOpen > 48;
-                        const envApprovers = import.meta.env.VITE_PR_APPROVERS || '';
-                        const reviewers = pr.reviewers?.map(r =>
-                            r.uniqueName || r.email || r.login
-                        ) || envApprovers.split(',').filter(Boolean);
-                        const envTeam = import.meta.env.VITE_PR_TEAM;
-                        const fullEmailList = reviewers.join(',');
-                        const tooltipPreview =
-                            reviewers.length > 2
-                                ? `${reviewers.slice(0, 2).join(', ')}, and ${reviewers.length - 2} more`
-                                : reviewers.join(',');
 
-                        const subject = `Reminder: Review Pending PR - ${pr.title}`;
-                        const body = `Hi Team,%0D%0A%0D%0AThis PR is pending for over 48 hours:%0D%0A${pr.title}%0D%0A${pr.url || ''}%0D%0APlease review it when you get a chance.%0D%0A%0D%0AThanks,%0D%0ADevDash`;
+                        // Build reviewer email list for mailto
+                        const reviewerEmails = pr.reviewers
+                            ?.map(r => r.uniqueName || r.email || '')
+                            .filter(Boolean)
+                            .join(',') || '';
+
+                        const subject = encodeURIComponent(`Reminder: Review Pending PR - ${pr.title}`);
+                        const body = encodeURIComponent(
+                            `Hi Team,\n\nThis PR is pending for over 48 hours:\n${pr.title}\n${pr.url || ''}\n\nPlease review it when you get a chance.\n\nThanks,\nDevDash`
+                        );
 
                         return (
                             <div
-                                key={index}
+                                key={`${pr.source}-${pr.id}-${index}`}
                                 className={`pr-row ${isOverdue ? 'overdue' : ''}`}
-                                title={isOverdue ? `Click to remind: ${tooltipPreview}` : 'PR under review'}
+                                title={isOverdue ? `Click to send reminder` : 'PR under review'}
                                 style={{ cursor: isOverdue ? 'pointer' : 'default' }}
                                 onClick={() => {
-                                    if (isOverdue) {
-                                        window.location.href = `mailto:${fullEmailList}?cc=${envTeam}&subject=${encodeURIComponent(subject)}&body=${body}`;
+                                    if (isOverdue && reviewerEmails) {
+                                        window.location.href = `mailto:${reviewerEmails}?subject=${subject}&body=${body}`;
+                                    } else if (pr.url) {
+                                        window.open(pr.url, '_blank', 'noopener,noreferrer');
                                     }
                                 }}
                             >
                                 <strong>{pr.title}</strong>
                                 <p>📁 Repo: <span>{pr.repoName}</span></p>
-                                <p>👤 {pr.author} | ⏱ {created.toLocaleString()}</p>
+                                <p>👤 {pr.author} | ⏱ {formatRelativeTime(pr.createdAt)}</p>
                                 <p className="source-label">{pr.source}</p>
                                 {isOverdue && (
                                     <span className="warning-label">🔴 Over 48 hrs</span>
@@ -125,7 +156,20 @@ const PRAlerts = () => {
                     })
                 )}
             </div>
+
+            <style>{`
+                .error-banner {
+                    padding: 8px 12px;
+                    background: rgba(239, 68, 68, 0.15);
+                    border: 1px solid rgba(239, 68, 68, 0.3);
+                    border-radius: 6px;
+                    color: #fca5a5;
+                    font-size: 12px;
+                    margin-bottom: 16px;
+                }
+            `}</style>
         </div>
     );
 };
+
 export default PRAlerts;
