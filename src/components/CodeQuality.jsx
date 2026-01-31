@@ -202,7 +202,7 @@ const CodeQuality = () => {
         </div>
       )}
 
-      <div className="projects-container">
+      <div className="code-quality-scroll">
         {projects.map((project) => {
           const qualityGate = getQualityGateStyle(project.qualityGate);
           const noIssues = hasNoIssues(project);
@@ -334,33 +334,6 @@ const CodeQuality = () => {
           margin-bottom: 16px;
         }
 
-        .projects-container {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          max-height: 400px;
-          overflow-y: auto;
-          padding-right: 8px;
-        }
-
-        /* Custom scrollbar for projects container */
-        .projects-container::-webkit-scrollbar {
-          width: 6px;
-        }
-
-        .projects-container::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 3px;
-        }
-
-        .projects-container::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.2);
-          border-radius: 3px;
-        }
-
-        .projects-container::-webkit-scrollbar-thumb:hover {
-          background: rgba(255, 255, 255, 0.3);
-        }
 
         /* Clickable Card Styles */
         .code-quality-clickable {

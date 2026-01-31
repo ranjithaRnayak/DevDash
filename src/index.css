@@ -1,4 +1,4 @@
-/* index.css – Complete Modern DevDash Theme */
+/* index.css ï¿½ Complete Modern DevDash Theme */
 
 /* Reset + Base */
 * {
@@ -363,6 +363,31 @@ input:checked + .slider {
     .pipeline-scroll::-webkit-scrollbar-track {
         background: #1a1e2e; /* background to match card */
     }
+
+/* Code Quality card scroll */
+.code-quality-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-height: 480px;
+    overflow-y: auto;
+    padding-right: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: #3b82f6 #1a1e2e;
+}
+
+.code-quality-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.code-quality-scroll::-webkit-scrollbar-thumb {
+    background-color: #3b82f6;
+    border-radius: 10px;
+}
+
+.code-quality-scroll::-webkit-scrollbar-track {
+    background: #1a1e2e;
+}
 
 .env-toggle {
     display: flex;
