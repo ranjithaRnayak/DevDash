@@ -4,105 +4,136 @@ import React, { useEffect, useState } from 'react';
 // SonarQube configuration from environment
 const SONAR_CONFIG = {
   // Always use Vite proxy in dev to avoid CORS (configured in vite.config.js)
-  // The proxy forwards /sonar/* to your SonarQube server
   proxyUrl: '/sonar',
-  projectKey: import.meta.env.VITE_SONARCUBE_REPO || '',
+  // Support multiple projects (comma-separated)
+  projectKeys: (import.meta.env.VITE_SONARCUBE_REPO || '').split(',').map(p => p.trim()).filter(Boolean),
   token: import.meta.env.VITE_SONAR_TOKEN || '',
+  // Base URL for constructing clickable links
+  baseUrl: import.meta.env.VITE_SONARCUBE_URL || '',
   isConfigured: !!(import.meta.env.VITE_SONARCUBE_URL && import.meta.env.VITE_SONARCUBE_REPO),
 };
 
 // Mock data for when SonarQube is not configured
-const mockMetrics = {
-  sonar: {
-    bugs: 5,
-    vulnerabilities: 2,
-    codeSmells: 18,
-    coverage: '82.3%',
-    duplications: '3.2%',
-    qualityGate: 'Passed',
-  },
-  github: {
-    alerts: 3,
-    outdatedDeps: 6,
-  },
-};
+const getMockMetrics = (projectKey) => ({
+  projectKey,
+  projectName: projectKey.split(':').pop() || projectKey,
+  bugs: 0,
+  vulnerabilities: 0,
+  codeSmells: 0,
+  coverage: 'N/A',
+  duplications: 'N/A',
+  qualityGate: 'Passed',
+});
 
 const CodeQuality = () => {
-  const [metrics, setMetrics] = useState(null);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [usingMockData, setUsingMockData] = useState(false);
 
   useEffect(() => {
-    const fetchSonarMetrics = async () => {
+    const fetchAllProjects = async () => {
       // If SonarQube is not configured, use mock data
-      if (!SONAR_CONFIG.isConfigured) {
+      if (!SONAR_CONFIG.isConfigured || SONAR_CONFIG.projectKeys.length === 0) {
         console.log('SonarQube not configured, using mock data');
-        setMetrics(mockMetrics.sonar);
+        setProjects([getMockMetrics('demo-project')]);
         setUsingMockData(true);
         setLoading(false);
         return;
       }
 
       try {
-        // Use Vite proxy to avoid CORS - proxy configured in vite.config.js
-        const apiUrl = `${SONAR_CONFIG.proxyUrl}/api/measures/component?component=${encodeURIComponent(SONAR_CONFIG.projectKey)}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,alert_status`;
+        // Fetch metrics for all configured projects
+        const projectPromises = SONAR_CONFIG.projectKeys.map(projectKey =>
+          fetchProjectMetrics(projectKey)
+        );
 
-        const headers = {
-          'Accept': 'application/json',
-        };
+        const results = await Promise.allSettled(projectPromises);
 
-        // Add authentication if token is provided (required for private projects)
-        if (SONAR_CONFIG.token) {
-          // SonarQube uses Basic auth with token as username, empty password
-          headers['Authorization'] = `Basic ${btoa(SONAR_CONFIG.token + ':')}`;
-        }
-
-        const response = await fetch(apiUrl, { headers });
-
-        if (!response.ok) {
-          if (response.status === 401) {
-            throw new Error('Authentication failed - check your SonarQube token');
-          } else if (response.status === 403) {
-            throw new Error('Access denied - token may not have access to this project');
-          } else if (response.status === 404) {
-            throw new Error('Project not found - check VITE_SONARCUBE_REPO');
+        const fetchedProjects = results.map((result, index) => {
+          if (result.status === 'fulfilled') {
+            return result.value;
+          } else {
+            console.error(`Failed to fetch project ${SONAR_CONFIG.projectKeys[index]}:`, result.reason);
+            return {
+              ...getMockMetrics(SONAR_CONFIG.projectKeys[index]),
+              error: result.reason?.message || 'Failed to fetch'
+            };
           }
-          throw new Error(`SonarQube API error: ${response.status}`);
-        }
-
-        const data = await response.json();
-
-        // Parse SonarQube response
-        const metricMap = {};
-        if (data.component && data.component.measures) {
-          data.component.measures.forEach((m) => {
-            metricMap[m.metric] = m.value;
-          });
-        }
-
-        setMetrics({
-          bugs: metricMap.bugs || 0,
-          vulnerabilities: metricMap.vulnerabilities || 0,
-          codeSmells: metricMap.code_smells || 0,
-          coverage: metricMap.coverage ? `${metricMap.coverage}%` : 'N/A',
-          duplications: metricMap.duplicated_lines_density ? `${metricMap.duplicated_lines_density}%` : 'N/A',
-          qualityGate: metricMap.alert_status === 'OK' ? 'Passed' : (metricMap.alert_status || 'Unknown'),
         });
+
+        setProjects(fetchedProjects);
         setUsingMockData(false);
       } catch (err) {
         console.error('SonarQube fetch error:', err);
         setError(err.message);
-        // Fall back to mock data on error
-        setMetrics(mockMetrics.sonar);
+        setProjects(SONAR_CONFIG.projectKeys.map(key => getMockMetrics(key)));
         setUsingMockData(true);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchSonarMetrics();
+    fetchAllProjects();
   }, []);
+
+  const fetchProjectMetrics = async (projectKey) => {
+    const apiUrl = `${SONAR_CONFIG.proxyUrl}/api/measures/component?component=${encodeURIComponent(projectKey)}&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,alert_status`;
+
+    const headers = {
+      'Accept': 'application/json',
+    };
+
+    if (SONAR_CONFIG.token) {
+      headers['Authorization'] = `Basic ${btoa(SONAR_CONFIG.token + ':')}`;
+    }
+
+    const response = await fetch(apiUrl, { headers });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error('Authentication failed');
+      } else if (response.status === 403) {
+        throw new Error('Access denied');
+      } else if (response.status === 404) {
+        throw new Error('Project not found');
+      }
+      throw new Error(`API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    const metricMap = {};
+    if (data.component && data.component.measures) {
+      data.component.measures.forEach((m) => {
+        metricMap[m.metric] = m.value;
+      });
+    }
+
+    // Extract project name from component
+    const projectName = data.component?.name || projectKey.split(':').pop() || projectKey;
+
+    return {
+      projectKey,
+      projectName,
+      bugs: parseInt(metricMap.bugs) || 0,
+      vulnerabilities: parseInt(metricMap.vulnerabilities) || 0,
+      codeSmells: parseInt(metricMap.code_smells) || 0,
+      coverage: metricMap.coverage ? `${metricMap.coverage}%` : 'N/A',
+      duplications: metricMap.duplicated_lines_density ? `${metricMap.duplicated_lines_density}%` : 'N/A',
+      qualityGate: metricMap.alert_status === 'OK' ? 'Passed' : (metricMap.alert_status || 'Unknown'),
+    };
+  };
+
+  // Click handler to open SonarQube project
+  const handleCardClick = (projectKey) => {
+    if (!SONAR_CONFIG.baseUrl) {
+      console.warn('SonarQube URL not configured');
+      return;
+    }
+    const sonarUrl = `${SONAR_CONFIG.baseUrl}/dashboard?id=${encodeURIComponent(projectKey)}&codeScope=overall`;
+    window.open(sonarUrl, '_blank', 'noopener,noreferrer');
+  };
 
   // Quality gate status styling
   const getQualityGateStyle = (status) => {
@@ -120,6 +151,13 @@ const CodeQuality = () => {
     if (numValue <= thresholds.low) return '#22c55e';
     if (numValue <= thresholds.medium) return '#f59e0b';
     return '#ef4444';
+  };
+
+  // Check if project has no issues
+  const hasNoIssues = (project) => {
+    return project.bugs === 0 &&
+           project.vulnerabilities === 0 &&
+           project.codeSmells === 0;
   };
 
   if (loading) {
@@ -147,10 +185,8 @@ const CodeQuality = () => {
     );
   }
 
-  const qualityGate = getQualityGateStyle(metrics?.qualityGate);
-
   return (
-    <div className="card code-quality-card">
+    <div className="card code-quality-container">
       <div className="card-header">
         <h2>Code Quality</h2>
         {usingMockData && (
@@ -166,85 +202,104 @@ const CodeQuality = () => {
         </div>
       )}
 
-      {/* Quality Gate Status */}
-      <div className="quality-gate" style={{ borderColor: qualityGate.color }}>
-        <span className="gate-icon" style={{ color: qualityGate.color }}>{qualityGate.icon}</span>
-        <div className="gate-info">
-          <span className="gate-label">Quality Gate</span>
-          <span className="gate-status" style={{ color: qualityGate.color }}>{metrics?.qualityGate}</span>
-        </div>
-      </div>
+      <div className="projects-container">
+        {projects.map((project) => {
+          const qualityGate = getQualityGateStyle(project.qualityGate);
+          const noIssues = hasNoIssues(project);
 
-      {/* Metrics Grid */}
-      <div className="metrics-grid">
-        <div className="metric-item">
-          <span className="metric-icon">🐞</span>
-          <div className="metric-info">
-            <span className="metric-value" style={{ color: getMetricStyle(metrics?.bugs, { low: 0, medium: 3, high: 10 }) }}>
-              {metrics?.bugs}
-            </span>
-            <span className="metric-label">Bugs</span>
-          </div>
-        </div>
+          return (
+            <div
+              key={project.projectKey}
+              className="code-quality-clickable"
+              onClick={() => handleCardClick(project.projectKey)}
+              title="Click to view full report in SonarQube"
+            >
+              {/* Project Header */}
+              <div className="project-header">
+                <span className="project-name">{project.projectName}</span>
+                <div className="quality-gate-badge" style={{ backgroundColor: `${qualityGate.color}20`, borderColor: qualityGate.color }}>
+                  <span style={{ color: qualityGate.color }}>{qualityGate.icon}</span>
+                  <span style={{ color: qualityGate.color }}>{project.qualityGate}</span>
+                </div>
+              </div>
 
-        <div className="metric-item">
-          <span className="metric-icon">🔓</span>
-          <div className="metric-info">
-            <span className="metric-value" style={{ color: getMetricStyle(metrics?.vulnerabilities, { low: 0, medium: 2, high: 5 }) }}>
-              {metrics?.vulnerabilities}
-            </span>
-            <span className="metric-label">Vulnerabilities</span>
-          </div>
-        </div>
+              {project.error && (
+                <div className="project-error">⚠️ {project.error}</div>
+              )}
 
-        <div className="metric-item">
-          <span className="metric-icon">💨</span>
-          <div className="metric-info">
-            <span className="metric-value" style={{ color: getMetricStyle(metrics?.codeSmells, { low: 5, medium: 20, high: 50 }) }}>
-              {metrics?.codeSmells}
-            </span>
-            <span className="metric-label">Code Smells</span>
-          </div>
-        </div>
+              {/* No Issues Message */}
+              {noIssues && !project.error && (
+                <div className="no-issues">
+                  <span className="no-issues-icon">✓</span>
+                  <span>No issues found</span>
+                </div>
+              )}
 
-        <div className="metric-item">
-          <span className="metric-icon">🧪</span>
-          <div className="metric-info">
-            <span className="metric-value">{metrics?.coverage}</span>
-            <span className="metric-label">Coverage</span>
-          </div>
-        </div>
+              {/* Metrics Grid */}
+              <div className="metrics-grid">
+                <div className="metric-item">
+                  <span className="metric-icon">🐞</span>
+                  <div className="metric-info">
+                    <span className="metric-value" style={{ color: getMetricStyle(project.bugs, { low: 0, medium: 3, high: 10 }) }}>
+                      {project.bugs}
+                    </span>
+                    <span className="metric-label">Bugs</span>
+                  </div>
+                </div>
 
-        <div className="metric-item">
-          <span className="metric-icon">📋</span>
-          <div className="metric-info">
-            <span className="metric-value">{metrics?.duplications}</span>
-            <span className="metric-label">Duplications</span>
-          </div>
-        </div>
-      </div>
+                <div className="metric-item">
+                  <span className="metric-icon">🔓</span>
+                  <div className="metric-info">
+                    <span className="metric-value" style={{ color: getMetricStyle(project.vulnerabilities, { low: 0, medium: 2, high: 5 }) }}>
+                      {project.vulnerabilities}
+                    </span>
+                    <span className="metric-label">Vulnerabilities</span>
+                  </div>
+                </div>
 
-      {/* GitHub Security (if connected) */}
-      {mockMetrics.github && (
-        <div className="github-security">
-          <h3>GitHub Security</h3>
-          <div className="security-items">
-            <div className="security-item">
-              <span className="security-icon">🔒</span>
-              <span className="security-value">{mockMetrics.github.alerts}</span>
-              <span className="security-label">Security Alerts</span>
+                <div className="metric-item">
+                  <span className="metric-icon">💨</span>
+                  <div className="metric-info">
+                    <span className="metric-value" style={{ color: getMetricStyle(project.codeSmells, { low: 5, medium: 20, high: 50 }) }}>
+                      {project.codeSmells}
+                    </span>
+                    <span className="metric-label">Code Smells</span>
+                  </div>
+                </div>
+
+                <div className="metric-item">
+                  <span className="metric-icon">🧪</span>
+                  <div className="metric-info">
+                    <span className="metric-value">{project.coverage}</span>
+                    <span className="metric-label">Coverage</span>
+                  </div>
+                </div>
+
+                <div className="metric-item">
+                  <span className="metric-icon">📋</span>
+                  <div className="metric-info">
+                    <span className="metric-value">{project.duplications}</span>
+                    <span className="metric-label">Duplications</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Click indicator */}
+              <div className="click-indicator">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+                <span>View in SonarQube</span>
+              </div>
             </div>
-            <div className="security-item">
-              <span className="security-icon">📦</span>
-              <span className="security-value">{mockMetrics.github.outdatedDeps}</span>
-              <span className="security-label">Outdated Deps</span>
-            </div>
-          </div>
-        </div>
-      )}
+          );
+        })}
+      </div>
 
       <style>{`
-        .code-quality-card {
+        .code-quality-container {
           position: relative;
         }
 
@@ -279,56 +334,103 @@ const CodeQuality = () => {
           margin-bottom: 16px;
         }
 
-        .quality-gate {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px 16px;
-          background: rgba(0, 0, 0, 0.2);
-          border-radius: 8px;
-          border-left: 4px solid;
-          margin-bottom: 20px;
-        }
-
-        .gate-icon {
-          font-size: 24px;
-          font-weight: bold;
-        }
-
-        .gate-info {
+        .projects-container {
           display: flex;
           flex-direction: column;
+          gap: 16px;
         }
 
-        .gate-label {
-          font-size: 12px;
-          color: #64748b;
+        /* Clickable Card Styles */
+        .code-quality-clickable {
+          padding: 16px;
+          background: rgba(0, 0, 0, 0.2);
+          border-radius: 12px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          cursor: pointer;
+          transition: all 0.3s ease;
+          position: relative;
         }
 
-        .gate-status {
+        .code-quality-clickable:hover {
+          transform: translateY(-2px);
+          border-color: rgba(59, 130, 246, 0.5);
+          box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15), 0 0 0 1px rgba(59, 130, 246, 0.1);
+        }
+
+        .code-quality-clickable:active {
+          transform: translateY(0);
+        }
+
+        .project-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+
+        .project-name {
           font-size: 16px;
           font-weight: 600;
+          color: #e2e8f0;
+        }
+
+        .quality-gate-badge {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px 10px;
+          border-radius: 16px;
+          border: 1px solid;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .project-error {
+          padding: 8px 12px;
+          background: rgba(239, 68, 68, 0.1);
+          border-radius: 6px;
+          color: #fca5a5;
+          font-size: 12px;
+          margin-bottom: 12px;
+        }
+
+        .no-issues {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 12px;
+          background: rgba(34, 197, 94, 0.1);
+          border: 1px solid rgba(34, 197, 94, 0.2);
+          border-radius: 8px;
+          color: #22c55e;
+          font-size: 14px;
+          font-weight: 500;
+          margin-bottom: 12px;
+        }
+
+        .no-issues-icon {
+          font-size: 18px;
         }
 
         .metrics-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-          gap: 12px;
-          margin-bottom: 20px;
+          grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+          gap: 10px;
         }
 
         .metric-item {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 12px;
+          gap: 8px;
+          padding: 10px;
           background: rgba(255, 255, 255, 0.03);
           border-radius: 8px;
           border: 1px solid rgba(255, 255, 255, 0.05);
         }
 
         .metric-icon {
-          font-size: 20px;
+          font-size: 18px;
         }
 
         .metric-info {
@@ -337,49 +439,45 @@ const CodeQuality = () => {
         }
 
         .metric-value {
-          font-size: 18px;
+          font-size: 16px;
           font-weight: 600;
         }
 
         .metric-label {
-          font-size: 11px;
+          font-size: 10px;
           color: #64748b;
         }
 
-        .github-security {
-          padding-top: 16px;
-          border-top: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .github-security h3 {
-          font-size: 14px;
-          color: #94a3b8;
-          margin: 0 0 12px 0;
-        }
-
-        .security-items {
-          display: flex;
-          gap: 16px;
-        }
-
-        .security-item {
+        .click-indicator {
           display: flex;
           align-items: center;
-          gap: 8px;
-        }
-
-        .security-icon {
-          font-size: 16px;
-        }
-
-        .security-value {
-          font-weight: 600;
-          color: #e2e8f0;
-        }
-
-        .security-label {
-          font-size: 12px;
+          justify-content: flex-end;
+          gap: 6px;
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 1px solid rgba(255, 255, 255, 0.05);
           color: #64748b;
+          font-size: 11px;
+          opacity: 0;
+          transition: opacity 0.3s ease;
+        }
+
+        .code-quality-clickable:hover .click-indicator {
+          opacity: 1;
+          color: #3b82f6;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+          .metrics-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+
+          .project-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
         }
       `}</style>
     </div>
