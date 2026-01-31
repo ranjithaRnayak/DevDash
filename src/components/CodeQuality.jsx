@@ -228,61 +228,61 @@ const CodeQuality = () => {
               )}
 
               {/* No Issues Message */}
-              {noIssues && !project.error && (
+              {noIssues && !project.error ? (
                 <div className="no-issues">
                   <span className="no-issues-icon">✓</span>
                   <span>No issues found</span>
                 </div>
+              ) : (
+                /* Metrics Grid - Only show if there are issues */
+                <div className="metrics-grid">
+                  <div className="metric-item">
+                    <span className="metric-icon">🐞</span>
+                    <div className="metric-info">
+                      <span className="metric-value" style={{ color: getMetricStyle(project.bugs, { low: 0, medium: 3, high: 10 }) }}>
+                        {project.bugs}
+                      </span>
+                      <span className="metric-label">Bugs</span>
+                    </div>
+                  </div>
+
+                  <div className="metric-item">
+                    <span className="metric-icon">🔓</span>
+                    <div className="metric-info">
+                      <span className="metric-value" style={{ color: getMetricStyle(project.vulnerabilities, { low: 0, medium: 2, high: 5 }) }}>
+                        {project.vulnerabilities}
+                      </span>
+                      <span className="metric-label">Vulnerabilities</span>
+                    </div>
+                  </div>
+
+                  <div className="metric-item">
+                    <span className="metric-icon">💨</span>
+                    <div className="metric-info">
+                      <span className="metric-value" style={{ color: getMetricStyle(project.codeSmells, { low: 5, medium: 20, high: 50 }) }}>
+                        {project.codeSmells}
+                      </span>
+                      <span className="metric-label">Code Smells</span>
+                    </div>
+                  </div>
+
+                  <div className="metric-item">
+                    <span className="metric-icon">🧪</span>
+                    <div className="metric-info">
+                      <span className="metric-value">{project.coverage}</span>
+                      <span className="metric-label">Coverage</span>
+                    </div>
+                  </div>
+
+                  <div className="metric-item">
+                    <span className="metric-icon">📋</span>
+                    <div className="metric-info">
+                      <span className="metric-value">{project.duplications}</span>
+                      <span className="metric-label">Duplications</span>
+                    </div>
+                  </div>
+                </div>
               )}
-
-              {/* Metrics Grid */}
-              <div className="metrics-grid">
-                <div className="metric-item">
-                  <span className="metric-icon">🐞</span>
-                  <div className="metric-info">
-                    <span className="metric-value" style={{ color: getMetricStyle(project.bugs, { low: 0, medium: 3, high: 10 }) }}>
-                      {project.bugs}
-                    </span>
-                    <span className="metric-label">Bugs</span>
-                  </div>
-                </div>
-
-                <div className="metric-item">
-                  <span className="metric-icon">🔓</span>
-                  <div className="metric-info">
-                    <span className="metric-value" style={{ color: getMetricStyle(project.vulnerabilities, { low: 0, medium: 2, high: 5 }) }}>
-                      {project.vulnerabilities}
-                    </span>
-                    <span className="metric-label">Vulnerabilities</span>
-                  </div>
-                </div>
-
-                <div className="metric-item">
-                  <span className="metric-icon">💨</span>
-                  <div className="metric-info">
-                    <span className="metric-value" style={{ color: getMetricStyle(project.codeSmells, { low: 5, medium: 20, high: 50 }) }}>
-                      {project.codeSmells}
-                    </span>
-                    <span className="metric-label">Code Smells</span>
-                  </div>
-                </div>
-
-                <div className="metric-item">
-                  <span className="metric-icon">🧪</span>
-                  <div className="metric-info">
-                    <span className="metric-value">{project.coverage}</span>
-                    <span className="metric-label">Coverage</span>
-                  </div>
-                </div>
-
-                <div className="metric-item">
-                  <span className="metric-icon">📋</span>
-                  <div className="metric-info">
-                    <span className="metric-value">{project.duplications}</span>
-                    <span className="metric-label">Duplications</span>
-                  </div>
-                </div>
-              </div>
 
               {/* Click indicator */}
               <div className="click-indicator">
@@ -338,6 +338,28 @@ const CodeQuality = () => {
           display: flex;
           flex-direction: column;
           gap: 16px;
+          max-height: 400px;
+          overflow-y: auto;
+          padding-right: 8px;
+        }
+
+        /* Custom scrollbar for projects container */
+        .projects-container::-webkit-scrollbar {
+          width: 6px;
+        }
+
+        .projects-container::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 3px;
+        }
+
+        .projects-container::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.2);
+          border-radius: 3px;
+        }
+
+        .projects-container::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.3);
         }
 
         /* Clickable Card Styles */
