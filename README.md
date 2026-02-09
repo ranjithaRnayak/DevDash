@@ -45,83 +45,99 @@ A developer dashboard integrating Azure DevOps, GitHub, SonarQube, and AI assist
 └───────────────┘     └─────────────────┘     └─────────────────┘
 ```
 
-## Data Flow
+## Quick Start
 
-```
-User Request → React Component → axios → .NET Controller → Service → External API
-                                              ↓
-                                    ConfigurationService
-                                    ├── app.config.json (settings)
-                                    └── secrets.config.json (PATs - server only)
-```
+### 1. Clone and Setup Backend
 
-## Project Structure
+```bash
+cd DevDash.API
 
-```
-DevDash/
-├── src/                              # React Frontend
-│   ├── components/
-│   │   ├── PipelineStatus.jsx        # CI/CD build status
-│   │   ├── PRAlerts.jsx              # Pull request alerts
-│   │   ├── CodeQuality.jsx           # SonarQube metrics
-│   │   ├── PerformanceCard.jsx       # Personal dev stats
-│   │   ├── AIAssistant.jsx           # Copilot/OpenAI chat
-│   │   └── LighthouseMetrics.jsx     # Performance audits
-│   ├── config/
-│   │   ├── dashboards.js             # Dev/Test configs
-│   │   └── featureFlags.js           # Feature toggles
-│   └── api/backendClient.js          # API client
-│
-├── DevDash.API/                      # .NET Backend
-│   ├── Controllers/                  # API endpoints
-│   ├── Services/                     # Business logic
-│   └── config/
-│       ├── app.config.json           # Settings (committed)
-│       └── secrets.config.json       # Secrets (gitignored)
+# Copy the secrets template and fill in your credentials
+cp config/secrets.config.json.template config/secrets.config.json
 ```
 
-## Configuration
-
-### Backend - app.config.json
+Edit `config/secrets.config.json`:
 ```json
 {
-  "services": {
-    "azureDevOps": { "organization": "your-org", "project": "YourProject" }
+  "authentication": {
+    "entraId": {
+      "clientId": "your-entra-client-id",
+      "tenantId": "your-tenant-id"
+    },
+    "github": {
+      "clientId": "your-github-oauth-client-id",
+      "clientSecret": "your-github-oauth-client-secret"
+    }
   },
-  "features": { "enableCopilot": true, "enableLighthouse": false }
-}
-```
-
-### Backend - secrets.config.json (GITIGNORED)
-```json
-{
   "services": {
-    "azureDevOps": { "pat": "YOUR_PAT" },
-    "sonarQube": { "token": "YOUR_TOKEN" },
-    "azureOpenAI": { "apiKey": "YOUR_KEY" }
+    "azureDevOps": {
+      "pat": "your-azure-devops-pat-token"
+    },
+    "sonarQube": {
+      "token": "your-sonarqube-token"
+    },
+    "azureOpenAI": {
+      "apiKey": "your-azure-openai-key"
+    },
+    "github": {
+      "pat": "your-github-pat-for-copilot"
+    }
   }
 }
 ```
 
-### Frontend - .env
+Update `config/app.config.json` with your org settings:
+```json
+{
+  "services": {
+    "azureDevOps": {
+      "organization": "your-org",
+      "project": "YourProject"
+    }
+  }
+}
+```
+
+Run backend:
+```bash
+dotnet run
+```
+
+### 2. Setup Frontend
+
+```bash
+# From project root
+cp .env.example .env
+```
+
+Edit `.env`:
 ```env
 VITE_API_URL=http://localhost:5000/api
 VITE_APP_ENV=dev
+
+# OAuth Client IDs (safe to expose - not secrets)
+VITE_ENTRA_CLIENT_ID=your-entra-client-id
+VITE_ENTRA_TENANT_ID=your-tenant-id
+VITE_GITHUB_CLIENT_ID=your-github-oauth-client-id
 ```
 
-## Getting Started
-
+Run frontend:
 ```bash
-# Backend
-cd DevDash.API
-cp config/secrets.config.json.template config/secrets.config.json
-# Edit secrets.config.json with your credentials
-dotnet run
-
-# Frontend
 npm install
 npm run dev
 ```
+
+Open http://localhost:5173
+
+## Configuration Files
+
+| File | Location | Purpose | Git Status |
+|------|----------|---------|------------|
+| `.env.example` | `/` | Frontend config template | Committed |
+| `.env` | `/` | Frontend config (your values) | **Gitignored** |
+| `app.config.json` | `/DevDash.API/config/` | Backend settings (org, project) | Committed |
+| `secrets.config.json.template` | `/DevDash.API/config/` | Backend secrets template | Committed |
+| `secrets.config.json` | `/DevDash.API/config/` | Backend secrets (your values) | **Gitignored** |
 
 ## API Endpoints
 
@@ -136,6 +152,6 @@ npm run dev
 
 ## Security
 
-- Secrets stored server-side only (never in frontend)
-- Backend proxy pattern for all external API calls
-- `secrets.config.json` is gitignored
+- **Secrets server-side only**: PATs and API keys in `secrets.config.json` (gitignored)
+- **Frontend safe**: Only OAuth client IDs in `.env` (not secrets)
+- **Backend proxy**: All external API calls go through backend with server-side auth
