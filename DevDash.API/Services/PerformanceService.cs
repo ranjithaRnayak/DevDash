@@ -534,7 +534,7 @@ public class PerformanceService : IPerformanceService
             // Build attendee list from reviewers
             var attendees = request.Reviewers?
                 .Where(r => !string.IsNullOrEmpty(r.Email))
-                .Select(r => new
+                .Select(r => (object)new
                 {
                     emailAddress = new { address = r.Email, name = r.DisplayName },
                     type = "required"
