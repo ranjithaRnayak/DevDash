@@ -1,5 +1,6 @@
 using DevDash.API.Models;
 using Elastic.Clients.Elasticsearch;
+using Elastic.Clients.Elasticsearch.Core.Search;
 using Elastic.Clients.Elasticsearch.QueryDsl;
 
 namespace DevDash.API.Services;
@@ -55,10 +56,10 @@ public class ElasticsearchIssueService : IIssueSearchService
                 .Query(q => q
                     .Bool(b => b
                         .Should(
-                            sh => sh.Match(m => m.Field(f => f.Title).Query(query).Boost(2)),
+                            sh => sh.Match(m => m.Field(f => f.Title).Query(query).Boost(2f)),
                             sh => sh.Match(m => m.Field(f => f.Description).Query(query)),
-                            sh => sh.Match(m => m.Field(f => f.Keywords).Query(query).Boost(1.5)),
-                            sh => sh.Match(m => m.Field(f => f.ErrorPatterns).Query(query).Boost(3))
+                            sh => sh.Match(m => m.Field(f => f.Keywords).Query(query).Boost(1.5f)),
+                            sh => sh.Match(m => m.Field(f => f.ErrorPatterns).Query(query).Boost(3f))
                         )
                     )
                 )
@@ -144,7 +145,8 @@ public class ElasticsearchIssueService : IIssueSearchService
 
         try
         {
-            await _client.IndexAsync(issue, i => i.Index(_issuesIndex).Id(issue.Id));
+            var indexRequest = new IndexRequest<Issue>(issue, _issuesIndex, issue.Id);
+            await _client.IndexAsync(indexRequest);
         }
         catch (Exception ex)
         {
@@ -162,7 +164,8 @@ public class ElasticsearchIssueService : IIssueSearchService
 
         try
         {
-            await _client.IndexAsync(resolution, i => i.Index(_resolutionsIndex).Id(resolution.Id));
+            var indexRequest = new IndexRequest<Resolution>(resolution, _resolutionsIndex, resolution.Id);
+            await _client.IndexAsync(indexRequest);
         }
         catch (Exception ex)
         {

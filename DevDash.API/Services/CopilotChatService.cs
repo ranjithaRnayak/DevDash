@@ -253,10 +253,10 @@ public class CopilotChatRequest
 {
     public string Message { get; set; } = string.Empty;
     public CopilotContext? Context { get; set; }
-    public List<ChatMessage>? ConversationHistory { get; set; }
+    public List<CopilotMessage>? ConversationHistory { get; set; }
 }
 
-public class ChatMessage
+public class CopilotMessage
 {
     public string Role { get; set; } = "user";
     public string Content { get; set; } = string.Empty;
@@ -272,13 +272,13 @@ public class CopilotChatResponse
 
 public class CopilotApiResponse
 {
-    public List<Choice>? Choices { get; set; }
+    public List<CopilotChoice>? Choices { get; set; }
     public UsageInfo? Usage { get; set; }
 }
 
-public class Choice
+public class CopilotChoice
 {
-    public ChatMessage? Message { get; set; }
+    public CopilotMessage? Message { get; set; }
 }
 
 public class UsageInfo

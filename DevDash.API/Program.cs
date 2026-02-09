@@ -6,7 +6,6 @@ using Microsoft.FeatureManagement;
 using StackExchange.Redis;
 using Elastic.Clients.Elasticsearch;
 using Microsoft.EntityFrameworkCore;
-using Azure.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,15 +22,6 @@ builder.Configuration
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile(Path.Combine(configPath, "secrets.config.json"), optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
-
-// Add Azure Key Vault (if configured)
-var keyVaultUri = builder.Configuration["KeyVault:Uri"];
-if (!string.IsNullOrEmpty(keyVaultUri))
-{
-    builder.Configuration.AddAzureKeyVault(
-        new Uri(keyVaultUri),
-        new DefaultAzureCredential());
-}
 
 // Register ConfigurationService for centralized config access
 builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
