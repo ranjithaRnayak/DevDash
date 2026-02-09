@@ -37,30 +37,17 @@ secrets.config.json    → Secrets (PATs, API keys) - GITIGNORED
     "OrganizationUrl": "https://dev.azure.com/YOUR_ORG",
     "Project": "YOUR_PROJECT",
     "Pipelines": {
-      "Dev": {
-        "Repos": "Repo1.API,Repo1.UI,Repo1.DevOps",
-        "BuildDefinitionIds": "1,2,3"
-      },
-      "Test": {
-        "Repos": "Repo1.API,Repo1.UI,Repo1.DevOps",
-        "BuildDefinitionIds": "4,5,6"
-      }
+      "Dev": { "Repos": "Repo1.API,Repo1.UI,Repo1.DevOps" },
+      "Test": { "Repos": "Repo1.API,Repo1.UI,Repo1.DevOps" }
     }
   },
 
   "GitHub": {
     "ApiUrl": "https://github.yourcompany.com/api/v3",
     "Owner": "YOUR_ORG",
-    "Repo": "YOUR_REPO",
-    "Pipelines": {
-      "Dev": {
-        "Repos": "repo1,repo2",
-        "WorkflowIds": "build.yml,deploy-dev.yml"
-      },
-      "Test": {
-        "Repos": "repo1,repo2",
-        "WorkflowIds": "build.yml,deploy-test.yml"
-      }
+    "Repos": {
+      "Dev": "repo1,repo2",
+      "Test": "repo1,repo2"
     }
   },
 
