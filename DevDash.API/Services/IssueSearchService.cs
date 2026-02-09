@@ -184,7 +184,7 @@ public class ElasticsearchIssueService : IIssueSearchService
 
         try
         {
-            var response = await _client.GetAsync<Issue>(id, g => g.Index(_issuesIndex));
+            var response = await _client.GetAsync<Issue>(_issuesIndex, id);
             return response.Source;
         }
         catch (Exception ex)
