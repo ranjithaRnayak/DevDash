@@ -80,6 +80,12 @@ export const healthAPI = {
   status: () => apiClient.get('/health/status'),
 };
 
+export const sonarqubeAPI = {
+  getConfig: () => apiClient.get('/sonarqube/config'),
+  getProjects: () => apiClient.get('/sonarqube/projects'),
+  getMetrics: (projectKey) => apiClient.get(`/sonarqube/projects/${projectKey}/metrics`),
+};
+
 export const copilotAPI = {
   chat: (request) => apiClient.post('/copilot/chat', request),
   getContext: (dashboardId) =>
