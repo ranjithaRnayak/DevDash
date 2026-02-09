@@ -222,8 +222,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
+app.UseHttpsRedirection();
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseMiddleware<RateLimitingMiddleware>();
