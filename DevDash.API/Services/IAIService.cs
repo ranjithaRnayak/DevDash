@@ -85,9 +85,8 @@ public class AIServiceRouter
         }
     }
 
-    private async Task<AIQueryResponse> GetKnowledgeBaseResponseAsync(AIQueryRequest request)
+    private Task<AIQueryResponse> GetKnowledgeBaseResponseAsync(AIQueryRequest request)
     {
-        // Return response from pre-defined knowledge base
         var response = new AIQueryResponse
         {
             Query = request.Query,
@@ -112,7 +111,7 @@ public class AIServiceRouter
 
         response.RelatedIssues = relatedIssues;
 
-        return response;
+        return Task.FromResult(response);
     }
 
     private static string ComputeHash(string input)
