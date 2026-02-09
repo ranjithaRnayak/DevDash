@@ -22,9 +22,19 @@ public class RateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        // Skip rate limiting for localhost/development
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "";
+        var isLocalhost = remoteIp == "::1" || remoteIp == "127.0.0.1" || remoteIp.StartsWith("192.168.");
+        var skipRateLimiting = _configuration.GetValue<bool>("RateLimiting:DisableForLocalhost", true);
+
+        if (isLocalhost && skipRateLimiting)
+        {
+            await _next(context);
+            return;
+        }
+
         var path = context.Request.Path.Value?.ToLower() ?? "";
 
-        // Apply rate limiting based on endpoint category
         if (path.Contains("/api/aiassistant") || path.Contains("/api/copilot"))
         {
             var limit = _configuration.GetValue<int>("RateLimiting:AIRequestsPerMinute", 20);
