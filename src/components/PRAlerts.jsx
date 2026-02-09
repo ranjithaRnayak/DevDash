@@ -1,16 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { devOpsAPI } from '../api/backendClient';
 
 const PRAlerts = () => {
     const [allPRs, setAllPRs] = useState([]);
+    const hasFetched = useRef(false);
 
     useEffect(() => {
+        if (hasFetched.current) return;
+        hasFetched.current = true;
+
         const fetchPRs = async () => {
             try {
                 const response = await devOpsAPI.getPullRequests('open');
                 const prs = response.data || [];
 
-                // Filter out drafts and sort by created date
                 const activePRs = prs
                     .filter(pr => pr.status !== 'Draft')
                     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
