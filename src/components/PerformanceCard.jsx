@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { performanceAPI } from '../api/backendClient';
 
 const PerformanceCard = () => {
     const [draftPRs, setDraftPRs] = useState([]);
@@ -16,8 +14,7 @@ const PerformanceCard = () => {
         const fetchDashboardData = async () => {
             setLoading(true);
             try {
-                // Fetch all data from backend
-                const response = await axios.get(`${API_BASE_URL}/performance/dashboard`);
+                const response = await performanceAPI.getDashboard();
                 const data = response.data || {};
 
                 setCurrentUser(data.user);
@@ -26,12 +23,11 @@ const PerformanceCard = () => {
                 setStoryPoints(data.storyPoints || { notStarted: 0, total: 0, items: [] });
             } catch (error) {
                 console.error('Failed to fetch dashboard data:', error);
-                // Try individual endpoints as fallback
                 try {
                     const [draftsRes, commitsRes, pointsRes] = await Promise.allSettled([
-                        axios.get(`${API_BASE_URL}/performance/draft-prs`),
-                        axios.get(`${API_BASE_URL}/performance/commits`),
-                        axios.get(`${API_BASE_URL}/performance/story-points`),
+                        performanceAPI.getDraftPRs(),
+                        performanceAPI.getCommits(),
+                        performanceAPI.getStoryPoints(),
                     ]);
 
                     if (draftsRes.status === 'fulfilled') setDraftPRs(draftsRes.value.data || []);
@@ -50,7 +46,6 @@ const PerformanceCard = () => {
 
     const handleScheduleCodeReview = async (pr = null) => {
         if (!pr) {
-            // No PR selected - open Teams meeting creation directly
             const teamsUrl = 'https://teams.microsoft.com/l/meeting/new?subject=' +
                 encodeURIComponent('Code Review Session');
             window.open(teamsUrl, '_blank', 'noopener,noreferrer');
@@ -60,7 +55,7 @@ const PerformanceCard = () => {
         setSchedulingMeeting(true);
 
         try {
-            const response = await axios.post(`${API_BASE_URL}/performance/schedule-review`, {
+            const response = await performanceAPI.scheduleReview({
                 prId: pr.id,
                 prTitle: pr.title,
                 prUrl: pr.url,

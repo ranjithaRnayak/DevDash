@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { sonarqubeAPI } from '../api/backendClient';
 
 const CodeQuality = () => {
     const [projects, setProjects] = useState([]);
@@ -12,10 +10,9 @@ const CodeQuality = () => {
         const fetchData = async () => {
             setLoading(true);
             try {
-                // Fetch config and projects from backend API (tokens handled server-side)
                 const [configRes, projectsRes] = await Promise.all([
-                    axios.get(`${API_BASE_URL}/sonarqube/config`),
-                    axios.get(`${API_BASE_URL}/sonarqube/projects`),
+                    sonarqubeAPI.getConfig(),
+                    sonarqubeAPI.getProjects(),
                 ]);
 
                 setSonarConfig(configRes.data || { baseUrl: '', isConfigured: false });

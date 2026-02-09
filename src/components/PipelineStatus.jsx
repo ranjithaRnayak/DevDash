@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { devOpsAPI } from '../api/backendClient';
 
 const PipelineStatus = () => {
     const [builds, setBuilds] = useState([]);
@@ -9,8 +7,7 @@ const PipelineStatus = () => {
     useEffect(() => {
         const fetchBuilds = async () => {
             try {
-                // Fetch builds from backend API (tokens handled server-side)
-                const response = await axios.get(`${API_BASE_URL}/devops/builds?count=20`);
+                const response = await devOpsAPI.getBuilds(20);
                 setBuilds(response.data || []);
             } catch (error) {
                 console.error('Failed to fetch pipeline builds:', error);

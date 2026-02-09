@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { devOpsAPI } from '../api/backendClient';
 
 const PRAlerts = () => {
     const [allPRs, setAllPRs] = useState([]);
@@ -9,8 +7,7 @@ const PRAlerts = () => {
     useEffect(() => {
         const fetchPRs = async () => {
             try {
-                // Fetch PRs from backend API (tokens handled server-side)
-                const response = await axios.get(`${API_BASE_URL}/devops/pullrequests?status=open`);
+                const response = await devOpsAPI.getPullRequests('open');
                 const prs = response.data || [];
 
                 // Filter out drafts and sort by created date

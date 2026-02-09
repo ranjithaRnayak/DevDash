@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { lighthouseAPI } from '../api/backendClient';
 
 const LighthouseMetrics = ({ selectedBranch, dashboardId }) => {
     const [metrics, setMetrics] = useState(null);
@@ -23,7 +21,7 @@ const LighthouseMetrics = ({ selectedBranch, dashboardId }) => {
 
     const checkStatus = async () => {
         try {
-            const response = await axios.get(`${API_BASE_URL}/lighthouse/status`);
+            const response = await lighthouseAPI.getStatus();
             setEnabled(response.data.enabled && response.data.configured);
 
             if (response.data.enabled) {
@@ -38,7 +36,7 @@ const LighthouseMetrics = ({ selectedBranch, dashboardId }) => {
 
     const fetchBranches = async () => {
         try {
-            const response = await axios.get(`${API_BASE_URL}/lighthouse/branches`);
+            const response = await lighthouseAPI.getBranches();
             setBranches(response.data || []);
 
             if (!currentBranch && response.data.length > 0) {
@@ -53,8 +51,8 @@ const LighthouseMetrics = ({ selectedBranch, dashboardId }) => {
         setLoading(true);
         try {
             const [metricsRes, historyRes] = await Promise.all([
-                axios.get(`${API_BASE_URL}/lighthouse/branch/${encodeURIComponent(branch)}`),
-                axios.get(`${API_BASE_URL}/lighthouse/branch/${encodeURIComponent(branch)}/history?limit=7`),
+                lighthouseAPI.getBranchResult(branch),
+                lighthouseAPI.getBranchHistory(branch, 7),
             ]);
 
             setMetrics(metricsRes.data);
