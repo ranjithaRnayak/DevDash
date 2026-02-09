@@ -5,14 +5,16 @@ A developer dashboard integrating Azure DevOps, GitHub, SonarQube, and AI assist
 ## Quick Start
 
 ```bash
-# Install concurrently if not already installed
-npm install
+# Windows
+startup.bat
 
-# Start both backend and frontend
+# Linux/Mac
+./startup.sh
+
+# Or using npm
+npm install
 npm run dev
 ```
-
-This runs the .NET backend and Vite frontend concurrently.
 
 ---
 
@@ -20,7 +22,7 @@ This runs the .NET backend and Vite frontend concurrently.
 
 ### File Structure
 ```
-appsettings.json       → Settings (URLs, repos, feature flags) - COMMITTED
+appsettings.json       → Settings (URLs, repos, emails) - COMMITTED
 secrets.config.json    → Secrets (PATs, API keys) - GITIGNORED
 .env                   → Frontend config (API URL) - GITIGNORED
 ```
@@ -36,37 +38,49 @@ secrets.config.json    → Secrets (PATs, API keys) - GITIGNORED
   "AzureDevOps": {
     "OrganizationUrl": "https://dev.azure.com/YOUR_ORG",
     "Project": "YOUR_PROJECT",
-    "Pipelines": {
-      "Dev": { "Repos": "Repo1.API,Repo1.UI,Repo1.DevOps" },
-      "Test": { "Repos": "Repo1.API,Repo1.UI,Repo1.DevOps" }
+    "Dev": {
+      "Repos": "Repo1.API,Repo1.UI,Repo1.Services",
+      "Pipelines": "CI-Build,CD-Deploy-Dev"
+    },
+    "Test": {
+      "Repos": "Repo1.API,Repo1.UI,Repo1.Services",
+      "Pipelines": "CI-Build,CD-Deploy-Test"
     }
   },
 
   "GitHub": {
-    "ApiUrl": "https://github.yourcompany.com/api/v3",
+    "ApiUrl": "https://api.github.com",
     "Owner": "YOUR_ORG",
-    "Repos": {
-      "Dev": "repo1,repo2",
-      "Test": "repo1,repo2"
-    }
+    "Dev": { "Repos": "repo1,repo2" },
+    "Test": { "Repos": "repo1,repo2" }
   },
 
   "PRAlerts": {
-    "Approvers": [
+    "OverdueHours": 48,
+    "OverdueEmail": {
+      "To": ["team-lead@company.com", "manager@company.com"],
+      "Cc": ["dev-team@company.com"],
+      "Subject": "Overdue PR Alert - Action Required"
+    }
+  },
+
+  "CodeReview": {
+    "DefaultReviewers": [
       { "Name": "John Doe", "Email": "john.doe@company.com" },
       { "Name": "Jane Smith", "Email": "jane.smith@company.com" }
     ],
-    "NotificationEmails": [
-      "team-lead@company.com",
-      "dev-team@company.com"
-    ],
-    "StalePRDays": 7,
-    "RequiredApprovers": 2
+    "MeetingDurationMinutes": 30
+  },
+
+  "StoryPoints": {
+    "IncludeTypes": ["User Story", "Product Backlog Item"],
+    "ExcludeStates": ["Done", "Closed", "Removed"],
+    "CurrentIterationOnly": true
   },
 
   "FeatureFlags": {
-    "UseAzureOpenAI": true,
-    "UseCopilot": false
+    "UseCopilot": false,
+    "UsePATToken": true
   }
 }
 ```
@@ -77,7 +91,6 @@ secrets.config.json    → Secrets (PATs, API keys) - GITIGNORED
 
 **Location:** `/DevDash.API/config/secrets.config.json`
 
-**Setup:**
 ```bash
 cd DevDash.API/config
 cp secrets.config.json.template secrets.config.json
@@ -85,55 +98,53 @@ cp secrets.config.json.template secrets.config.json
 
 ```json
 {
-  "AzureAd": {
-    "TenantId": "YOUR_TENANT_ID",
-    "ClientId": "YOUR_CLIENT_ID"
-  },
-  "AzureDevOps": {
-    "PAT": "YOUR_AZURE_DEVOPS_PAT"
-  },
-  "GitHub": {
-    "ClientId": "YOUR_GITHUB_OAUTH_CLIENT_ID",
-    "ClientSecret": "YOUR_GITHUB_OAUTH_CLIENT_SECRET",
-    "PAT": "YOUR_GITHUB_PAT"
-  },
-  "AzureOpenAI": {
-    "ApiKey": "YOUR_AZURE_OPENAI_KEY"
-  },
-  "Copilot": {
-    "ApiKey": "YOUR_GITHUB_COPILOT_API_KEY"
-  },
-  "SonarQube": {
-    "Token": "YOUR_SONARQUBE_TOKEN"
-  },
-  "MicrosoftGraph": {
-    "TenantId": "YOUR_TENANT_ID",
-    "ClientId": "YOUR_GRAPH_CLIENT_ID",
-    "ClientSecret": "YOUR_GRAPH_CLIENT_SECRET"
-  }
+  "AzureDevOps": { "PAT": "YOUR_AZURE_DEVOPS_PAT" },
+  "GitHub": { "PAT": "ghp_YOUR_GITHUB_PAT" },
+  "SonarQube": { "Token": "YOUR_SONARQUBE_TOKEN" },
+  "AzureOpenAI": { "ApiKey": "YOUR_AZURE_OPENAI_KEY" },
+  "Copilot": { "ApiKey": "YOUR_COPILOT_KEY" }
 }
 ```
 
 ---
 
-### 3. Frontend Config: `.env`
+## Configuration Reference
 
-**Setup:**
-```bash
-cp .env.example .env
-```
+### Azure DevOps (Dev/Test Environments)
 
-```env
-VITE_API_BASE_URL=http://localhost:5000/api
-VITE_USE_PAT_TOKEN=false
-VITE_GITHUB_OAUTH_ENABLED=true
-```
+| Setting | Description |
+|---------|-------------|
+| `AzureDevOps.Dev.Repos` | Comma-separated repos for Dev environment |
+| `AzureDevOps.Dev.Pipelines` | Comma-separated pipelines for Dev |
+| `AzureDevOps.Test.Repos` | Comma-separated repos for Test environment |
+| `AzureDevOps.Test.Pipelines` | Comma-separated pipelines for Test |
+
+### PR Alerts & Overdue Notifications
+
+| Setting | Description |
+|---------|-------------|
+| `PRAlerts.OverdueHours` | Hours before PR is considered overdue (default: 48) |
+| `PRAlerts.OverdueEmail.To` | Email recipients for overdue alerts |
+| `PRAlerts.OverdueEmail.Cc` | CC recipients for overdue alerts |
+
+### Code Review Scheduling
+
+| Setting | Description |
+|---------|-------------|
+| `CodeReview.DefaultReviewers` | Default reviewers (TO field) when scheduling |
+| `CodeReview.MeetingDurationMinutes` | Default meeting duration |
+
+### Story Points (Current Iteration)
+
+| Setting | Description |
+|---------|-------------|
+| `StoryPoints.IncludeTypes` | Work item types to include |
+| `StoryPoints.ExcludeStates` | States to exclude (Done, Closed) |
+| `StoryPoints.CurrentIterationOnly` | Only show current sprint items |
 
 ---
 
 ## AI Provider Configuration
-
-The AI Assistant uses either Azure OpenAI or GitHub Copilot based on the `FeatureFlags.UseCopilot` setting:
 
 | Flag | AI Provider | Token Location |
 |------|-------------|----------------|
@@ -142,46 +153,15 @@ The AI Assistant uses either Azure OpenAI or GitHub Copilot based on the `Featur
 
 ---
 
-## Component → Configuration Mapping
+## Features
 
-| Component | Config Section | What to Configure |
-|-----------|---------------|-------------------|
-| **PipelineStatus** | `AzureDevOps.Pipelines` | Repos and build IDs for Dev/Test |
-| **PRAlerts** | `PRAlerts.Approvers` | List of approvers with email |
-| **PRAlerts** | `PRAlerts.NotificationEmails` | Email addresses for notifications |
-| **AIAssistant** | `FeatureFlags.UseCopilot` | `true` = Copilot, `false` = Azure OpenAI |
-| **GitHub PRs** | `GitHub.Owner`, `GitHub.Repo` | GitHub org and repo |
-| **Azure PRs** | `AzureDevOps.Project` | Azure DevOps project name |
-
----
-
-## Architecture
-
-```
-Frontend (React + Vite)
-├── Dashboard.jsx / TestDashboard.jsx
-│   ├── PipelineStatus.jsx  → GET /api/devops/builds
-│   ├── PRAlerts.jsx        → GET /api/devops/pullrequests
-│   ├── CodeQuality.jsx     → GET /api/sonarqube/projects
-│   ├── PerformanceCard.jsx → GET /api/performance/dashboard
-│   ├── AIAssistant.jsx     → POST /api/aiassistant/query (or /copilot/chat)
-│   └── LighthouseMetrics   → GET /api/lighthouse/branches
-│
-Backend (.NET 8)
-├── Controllers → Services → External APIs
-└── Config: appsettings.json + secrets.config.json (merged)
-```
-
----
-
-## GitHubConnect vs AIAssistant
-
-| Component | Purpose |
-|-----------|---------|
-| **GitHubConnect** | OAuth/PAT authentication for GitHub DevOps features (PRs, commits, repos) |
-| **AIAssistant** | AI chat using Azure OpenAI or GitHub Copilot API |
-
-These serve different purposes - GitHubConnect is for DevOps data, AIAssistant is for AI queries.
+| Feature | Description |
+|---------|-------------|
+| **Draft PRs** | Shows only PRs created by logged-in user |
+| **Story Points** | Current iteration, excludes Done/Closed |
+| **Overdue PRs** | Alerts after 48 hours with email notification |
+| **Code Review** | Schedule Teams meeting with default reviewers |
+| **AI Assistant** | Azure OpenAI or GitHub Copilot |
 
 ---
 
@@ -192,4 +172,3 @@ These serve different purposes - GitHubConnect is for DevOps data, AIAssistant i
 | `npm run dev` | Start backend + frontend concurrently |
 | `npm run frontend` | Start only Vite dev server |
 | `npm run backend` | Start only .NET backend |
-| `npm run build` | Build frontend for production |
