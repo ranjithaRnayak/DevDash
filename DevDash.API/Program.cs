@@ -7,13 +7,21 @@ using StackExchange.Redis;
 using Elastic.Clients.Elasticsearch;
 using Microsoft.EntityFrameworkCore;
 using Azure.Identity;
-using Azure.Security.KeyVault.Secrets;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ============================================
-// Configuration
+// Configuration - Load consolidated config files
 // ============================================
+
+var configPath = Path.Combine(AppContext.BaseDirectory, "config");
+
+builder.Configuration
+    .SetBasePath(AppContext.BaseDirectory)
+    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+    .AddJsonFile(Path.Combine(configPath, "app.config.json"), optional: true, reloadOnChange: true)
+    .AddJsonFile(Path.Combine(configPath, "secrets.config.json"), optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables();
 
 // Add Azure Key Vault (if configured)
 var keyVaultUri = builder.Configuration["KeyVault:Uri"];
@@ -24,30 +32,45 @@ if (!string.IsNullOrEmpty(keyVaultUri))
         new DefaultAzureCredential());
 }
 
+// Register ConfigurationService for centralized config access
+builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
+
 // ============================================
 // Authentication - Microsoft Entra ID
 // ============================================
 
-builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration, "AzureAd");
+var entraEnabled = builder.Configuration.GetValue<bool>("Features:EnableEntraId", true);
+if (entraEnabled)
+{
+    builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration, "AzureAd");
+}
 
 // ============================================
 // Feature Flags
 // ============================================
 
-builder.Services.AddFeatureManagement(builder.Configuration.GetSection("FeatureFlags"));
+builder.Services.AddFeatureManagement(builder.Configuration.GetSection("Features"));
 
 // ============================================
 // Database - SQL Server
 // ============================================
 
-builder.Services.AddDbContext<DevDashDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("SqlServer")));
+var sqlConnection = builder.Configuration["ConnectionStrings:SqlServer"]
+                    ?? builder.Configuration.GetConnectionString("SqlServer");
+
+if (!string.IsNullOrEmpty(sqlConnection))
+{
+    builder.Services.AddDbContext<DevDashDbContext>(options =>
+        options.UseSqlServer(sqlConnection));
+}
 
 // ============================================
 // Redis Cache
 // ============================================
 
-var redisConnection = builder.Configuration.GetConnectionString("Redis");
+var redisConnection = builder.Configuration["ConnectionStrings:Redis"]
+                      ?? builder.Configuration.GetConnectionString("Redis");
+
 if (!string.IsNullOrEmpty(redisConnection))
 {
     builder.Services.AddSingleton<IConnectionMultiplexer>(
@@ -56,7 +79,6 @@ if (!string.IsNullOrEmpty(redisConnection))
 }
 else
 {
-    // Fallback to in-memory cache for development
     builder.Services.AddMemoryCache();
     builder.Services.AddScoped<ICacheService, InMemoryCacheService>();
 }
@@ -65,7 +87,9 @@ else
 // Elasticsearch
 // ============================================
 
-var elasticUri = builder.Configuration["Elasticsearch:Uri"];
+var elasticUri = builder.Configuration["Services:Elasticsearch:Uri"]
+                 ?? builder.Configuration["Elasticsearch:Uri"];
+
 if (!string.IsNullOrEmpty(elasticUri))
 {
     builder.Services.AddSingleton(new ElasticsearchClient(new Uri(elasticUri)));
@@ -118,6 +142,26 @@ builder.Services.AddHttpClient("MicrosoftGraph", client =>
 builder.Services.AddScoped<IPerformanceService, PerformanceService>();
 
 // ============================================
+// Copilot Service (GitHub Copilot Chat)
+// ============================================
+
+var copilotEnabled = builder.Configuration.GetValue<bool>("Features:EnableCopilot", false);
+if (copilotEnabled)
+{
+    builder.Services.AddScoped<ICopilotChatService, CopilotChatService>();
+}
+
+// ============================================
+// Lighthouse Service
+// ============================================
+
+var lighthouseEnabled = builder.Configuration.GetValue<bool>("Features:EnableLighthouse", false);
+if (lighthouseEnabled)
+{
+    builder.Services.AddScoped<ILighthouseService, LighthouseService>();
+}
+
+// ============================================
 // Health Checks
 // ============================================
 
@@ -133,7 +177,6 @@ if (!string.IsNullOrEmpty(elasticUri))
     healthChecksBuilder.AddElasticsearch(elasticUri, name: "elasticsearch");
 }
 
-var sqlConnection = builder.Configuration.GetConnectionString("SqlServer");
 if (!string.IsNullOrEmpty(sqlConnection))
 {
     healthChecksBuilder.AddSqlServer(sqlConnection, name: "sqlserver");
@@ -147,9 +190,10 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins(
-                builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                ?? new[] { "http://localhost:5173" })
+        var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                      ?? new[] { "http://localhost:5173" };
+
+        policy.WithOrigins(origins)
             .AllowAnyMethod()
             .AllowAnyHeader()
             .AllowCredentials();
@@ -182,10 +226,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
 
-// Custom error handling
 app.UseMiddleware<ErrorHandlingMiddleware>();
-
-// Rate limiting middleware
 app.UseMiddleware<RateLimitingMiddleware>();
 
 app.UseAuthentication();

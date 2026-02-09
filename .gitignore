@@ -23,3 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Secrets (backend config)
+**/secrets.config.json
+**/appsettings.Development.json
+**/appsettings.Local.json
