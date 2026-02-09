@@ -1,44 +1,63 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 
 /**
  * Custom hook for managing Dev/Test environment toggle
- * Handles visual updates and state management for the environment switch
+ * Uses CSS classes for smooth transitions without flickering
  */
 export function useEnvironmentToggle() {
     const [isTestMode, setIsTestMode] = useState(false);
+    const initialized = useRef(false);
 
-    useEffect(() => {
-        const toggle = document.getElementById("envToggle");
+    const updateEnvironment = useCallback((isTest) => {
+        document.body.classList.remove('env-dev', 'env-test');
+        document.body.classList.add(isTest ? 'env-test' : 'env-dev');
+
         const labelLeft = document.getElementById("envLeftLabel");
         const labelRight = document.getElementById("envRightLabel");
         const slider = document.querySelector(".slider");
 
-        if (!toggle || !labelLeft || !labelRight || !slider) return;
-
-        const updateLabel = () => {
-            if (toggle.checked) {
+        if (labelLeft && labelRight && slider) {
+            if (isTest) {
                 labelLeft.style.color = "#ccc";
                 labelLeft.style.fontSize = "14px";
                 labelRight.style.color = "#3b82f6";
                 labelRight.style.fontSize = "16px";
-                document.body.style.backgroundColor = "#1b324f";
                 slider.style.backgroundColor = "#3b82f6";
             } else {
                 labelLeft.style.color = "#22c55e";
                 labelLeft.style.fontSize = "16px";
                 labelRight.style.color = "#ccc";
                 labelRight.style.fontSize = "14px";
-                document.body.style.backgroundColor = "#17271f";
                 slider.style.backgroundColor = "#22c55e";
             }
-            setIsTestMode(toggle.checked);
+        }
+
+        setIsTestMode(isTest);
+    }, []);
+
+    useEffect(() => {
+        if (initialized.current) return;
+
+        const toggle = document.getElementById("envToggle");
+        if (!toggle) return;
+
+        initialized.current = true;
+
+        const handleChange = () => {
+            updateEnvironment(toggle.checked);
         };
 
-        toggle.addEventListener("change", updateLabel);
-        updateLabel();
+        toggle.addEventListener("change", handleChange);
 
-        return () => toggle.removeEventListener("change", updateLabel);
-    }, []);
+        // Use requestAnimationFrame for initial render to prevent flickering
+        requestAnimationFrame(() => {
+            updateEnvironment(toggle.checked);
+        });
+
+        return () => {
+            toggle.removeEventListener("change", handleChange);
+        };
+    }, [updateEnvironment]);
 
     return isTestMode;
 }
