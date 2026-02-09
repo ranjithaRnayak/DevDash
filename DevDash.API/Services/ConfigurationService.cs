@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace DevDash.API.Services;
 
 /// <summary>
-/// Centralized configuration service that loads app.config.json and secrets.config.json
+/// Centralized configuration service that loads appsettings.json and secrets.config.json
 /// Provides strongly-typed access to all configuration settings
 /// </summary>
 public interface IConfigurationService
@@ -24,7 +24,7 @@ public class ConfigurationService : IConfigurationService
         _logger = logger;
         _config = new AppConfiguration();
 
-        // Load from IConfiguration (which includes app.config.json via builder)
+        // Load from IConfiguration (which includes appsettings.json via builder)
         configuration.Bind(_config);
 
         // Load secrets file if it exists

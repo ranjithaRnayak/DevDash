@@ -11,15 +11,16 @@ using Azure.Identity;
 var builder = WebApplication.CreateBuilder(args);
 
 // ============================================
-// Configuration - Load consolidated config files
+// Configuration
 // ============================================
+// appsettings.json    - Settings (org, project, URLs) - committed
+// config/secrets.config.json - Secrets (PATs, keys) - gitignored
 
 var configPath = Path.Combine(AppContext.BaseDirectory, "config");
 
 builder.Configuration
     .SetBasePath(AppContext.BaseDirectory)
-    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-    .AddJsonFile(Path.Combine(configPath, "app.config.json"), optional: true, reloadOnChange: true)
+    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile(Path.Combine(configPath, "secrets.config.json"), optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();
 

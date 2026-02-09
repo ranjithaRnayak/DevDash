@@ -16,128 +16,148 @@ A developer dashboard integrating Azure DevOps, GitHub, SonarQube, and AI assist
 │  ├── AIAssistant.jsx     ──→  POST /api/copilot/chat                    │
 │  │                            POST /api/aiassistant/query               │
 │  └── LighthouseMetrics   ──→  GET /api/lighthouse/branches              │
-│                                                                          │
-│  Config: dashboards.js, featureFlags.js                                 │
-│  .env: VITE_API_URL (no secrets)                                        │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                 │ HTTPS
                                 ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         BACKEND (.NET 8 Web API)                         │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  Controllers                           Services                          │
-│  ├── DevOpsController      ←──→       AzureDevOpsService                │
-│  ├── PerformanceController ←──→       PerformanceService                │
-│  ├── CopilotController     ←──→       CopilotChatService                │
-│  ├── SonarQubeController   ←──→       SonarQubeService                  │
-│  └── LighthouseController  ←──→       LighthouseService                 │
+│  Controllers ←──→ Services ←──→ External APIs                           │
 │                                                                          │
-│  ConfigurationService                                                    │
-│  ├── config/app.config.json      (settings - committed)                 │
-│  └── config/secrets.config.json  (PATs, keys - GITIGNORED)              │
-└───────────────────────────────┬─────────────────────────────────────────┘
-                                │
-        ┌───────────────────────┼───────────────────────┐
-        ▼                       ▼                       ▼
-┌───────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│ Azure DevOps  │     │ GitHub/Copilot  │     │   SonarQube     │
-│ /_apis/*      │     │ /copilot/chat   │     │ /api/measures   │
-└───────────────┘     └─────────────────┘     └─────────────────┘
+│  Configuration (merged at startup):                                      │
+│  ├── appsettings.json           (settings - COMMITTED)                  │
+│  └── config/secrets.config.json (secrets - GITIGNORED)                  │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+## Configuration (Only 2 Files Needed)
+
+### How it works:
+```
+appsettings.json + secrets.config.json = Final Configuration
+     (settings)         (secrets)              (merged)
+```
+
+The backend merges both files at startup. Values in `secrets.config.json` override `appsettings.json`.
+
+---
+
+### File 1: `appsettings.json` (Committed - Settings Only)
+
+Location: `/DevDash.API/appsettings.json`
+
+Contains: URLs, org names, project names, feature flags (no secrets)
+
+```json
+{
+  "AzureDevOps": {
+    "OrganizationUrl": "https://dev.azure.com/YOUR_ORG",
+    "Project": "YOUR_PROJECT",
+    "PAT": ""
+  },
+  "SonarQube": {
+    "Url": "https://sonarqube.yourcompany.com",
+    "Token": "",
+    "Projects": "project-key-1,project-key-2"
+  },
+  "GitHub": {
+    "ApiUrl": "https://github.yourcompany.com/api/v3",
+    "ClientId": "",
+    "ClientSecret": "",
+    "PAT": ""
+  },
+  "FeatureFlags": {
+    "UseAzureOpenAI": true,
+    "UseCopilot": false
+  }
+}
+```
+
+---
+
+### File 2: `secrets.config.json` (Gitignored - Secrets Only)
+
+Location: `/DevDash.API/config/secrets.config.json`
+
+**Setup:**
+```bash
+cd DevDash.API/config
+cp secrets.config.json.template secrets.config.json
+# Edit secrets.config.json with your values
+```
+
+Contains: PATs, API keys, client secrets
+
+```json
+{
+  "AzureDevOps": {
+    "PAT": "your-azure-devops-pat-token"
+  },
+  "SonarQube": {
+    "Token": "your-sonarqube-token"
+  },
+  "AzureOpenAI": {
+    "ApiKey": "your-azure-openai-key"
+  },
+  "GitHub": {
+    "ClientSecret": "your-github-client-secret",
+    "PAT": "your-github-pat"
+  },
+  "MicrosoftGraph": {
+    "ClientSecret": "your-graph-client-secret"
+  }
+}
+```
+
+---
+
+### File 3: `.env` (Gitignored - Frontend Only)
+
+Location: `/.env`
+
+**Setup:**
+```bash
+cp .env.example .env
+# Edit .env with your values
+```
+
+Contains: API URL and OAuth client IDs (not secrets)
+
+```env
+VITE_API_URL=http://localhost:5000/api
+VITE_ENTRA_CLIENT_ID=your-client-id
+VITE_GITHUB_CLIENT_ID=your-github-client-id
+```
+
+---
 
 ## Quick Start
 
-### 1. Clone and Setup Backend
-
 ```bash
+# 1. Backend setup
 cd DevDash.API
-
-# Copy the secrets template and fill in your credentials
 cp config/secrets.config.json.template config/secrets.config.json
-```
-
-Edit `config/secrets.config.json`:
-```json
-{
-  "authentication": {
-    "entraId": {
-      "clientId": "your-entra-client-id",
-      "tenantId": "your-tenant-id"
-    },
-    "github": {
-      "clientId": "your-github-oauth-client-id",
-      "clientSecret": "your-github-oauth-client-secret"
-    }
-  },
-  "services": {
-    "azureDevOps": {
-      "pat": "your-azure-devops-pat-token"
-    },
-    "sonarQube": {
-      "token": "your-sonarqube-token"
-    },
-    "azureOpenAI": {
-      "apiKey": "your-azure-openai-key"
-    },
-    "github": {
-      "pat": "your-github-pat-for-copilot"
-    }
-  }
-}
-```
-
-Update `config/app.config.json` with your org settings:
-```json
-{
-  "services": {
-    "azureDevOps": {
-      "organization": "your-org",
-      "project": "YourProject"
-    }
-  }
-}
-```
-
-Run backend:
-```bash
+# Edit appsettings.json (org, project, URLs)
+# Edit config/secrets.config.json (PATs, keys)
 dotnet run
-```
 
-### 2. Setup Frontend
-
-```bash
-# From project root
+# 2. Frontend setup
+cd ..
 cp .env.example .env
-```
-
-Edit `.env`:
-```env
-VITE_API_URL=http://localhost:5000/api
-VITE_APP_ENV=dev
-
-# OAuth Client IDs (safe to expose - not secrets)
-VITE_ENTRA_CLIENT_ID=your-entra-client-id
-VITE_ENTRA_TENANT_ID=your-tenant-id
-VITE_GITHUB_CLIENT_ID=your-github-oauth-client-id
-```
-
-Run frontend:
-```bash
+# Edit .env (API URL, client IDs)
 npm install
 npm run dev
 ```
 
 Open http://localhost:5173
 
-## Configuration Files
+## Configuration Summary
 
-| File | Location | Purpose | Git Status |
-|------|----------|---------|------------|
-| `.env.example` | `/` | Frontend config template | Committed |
-| `.env` | `/` | Frontend config (your values) | **Gitignored** |
-| `app.config.json` | `/DevDash.API/config/` | Backend settings (org, project) | Committed |
-| `secrets.config.json.template` | `/DevDash.API/config/` | Backend secrets template | Committed |
-| `secrets.config.json` | `/DevDash.API/config/` | Backend secrets (your values) | **Gitignored** |
+| File | Location | What to Put | Git Status |
+|------|----------|-------------|------------|
+| `appsettings.json` | `/DevDash.API/` | Org, project, URLs, feature flags | **Committed** |
+| `secrets.config.json` | `/DevDash.API/config/` | PATs, API keys, client secrets | **Gitignored** |
+| `.env` | `/` | API URL, OAuth client IDs | **Gitignored** |
 
 ## API Endpoints
 
@@ -149,9 +169,3 @@ Open http://localhost:5173
 | PerformanceCard | `GET /api/performance/dashboard` |
 | AIAssistant | `POST /api/copilot/chat` |
 | LighthouseMetrics | `GET /api/lighthouse/branches` |
-
-## Security
-
-- **Secrets server-side only**: PATs and API keys in `secrets.config.json` (gitignored)
-- **Frontend safe**: Only OAuth client IDs in `.env` (not secrets)
-- **Backend proxy**: All external API calls go through backend with server-side auth
