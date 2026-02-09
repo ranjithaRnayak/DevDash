@@ -115,11 +115,12 @@ public class ElasticsearchIssueService : IIssueSearchService
                 .Index(_issuesIndex)
                 .Size(limit)
                 .Query(q => q
-                    .MoreLikeThis(mlt => mlt
-                        .Fields(new[] { "title", "description", "errorPatterns" })
-                        .Like(l => l.Text(errorPattern))
-                        .MinTermFreq(1)
-                        .MinDocFreq(1)
+                    .Bool(b => b
+                        .Should(
+                            sh => sh.Match(m => m.Field(f => f.Title).Query(errorPattern)),
+                            sh => sh.Match(m => m.Field(f => f.Description).Query(errorPattern)),
+                            sh => sh.Match(m => m.Field(f => f.ErrorPatterns).Query(errorPattern))
+                        )
                     )
                 )
             );

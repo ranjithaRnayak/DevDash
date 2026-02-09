@@ -66,7 +66,7 @@ if (!string.IsNullOrEmpty(sqlConnection))
 }
 
 // ============================================
-// Redis Cache
+// Redis Cache (optional - falls back to in-memory)
 // ============================================
 
 var redisConnection = builder.Configuration["ConnectionStrings:Redis"]
@@ -74,9 +74,17 @@ var redisConnection = builder.Configuration["ConnectionStrings:Redis"]
 
 if (!string.IsNullOrEmpty(redisConnection))
 {
-    builder.Services.AddSingleton<IConnectionMultiplexer>(
-        ConnectionMultiplexer.Connect(redisConnection));
-    builder.Services.AddScoped<ICacheService, RedisCacheService>();
+    try
+    {
+        var redis = ConnectionMultiplexer.Connect(redisConnection);
+        builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
+        builder.Services.AddScoped<ICacheService, RedisCacheService>();
+    }
+    catch
+    {
+        builder.Services.AddMemoryCache();
+        builder.Services.AddScoped<ICacheService, InMemoryCacheService>();
+    }
 }
 else
 {

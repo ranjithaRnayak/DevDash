@@ -231,21 +231,19 @@ public class CopilotChatService : ICopilotChatService
         return sb.ToString();
     }
 
-    private async Task<List<PipelineFailure>> GetRecentFailuresAsync(List<string> pipelines)
+    private Task<List<PipelineFailure>> GetRecentFailuresAsync(List<string> pipelines)
     {
-        // This would integrate with your existing DevOps service
-        // For now, return empty list - actual implementation would query Azure DevOps
-        return new List<PipelineFailure>();
+        return Task.FromResult(new List<PipelineFailure>());
     }
 
-    private async Task<List<OpenPR>> GetOpenPRsAsync()
+    private Task<List<OpenPR>> GetOpenPRsAsync()
     {
-        return new List<OpenPR>();
+        return Task.FromResult(new List<OpenPR>());
     }
 
-    private async Task<BuildTrends?> GetBuildTrendsAsync(List<string> pipelines)
+    private Task<BuildTrends?> GetBuildTrendsAsync(List<string> pipelines)
     {
-        return null;
+        return Task.FromResult<BuildTrends?>(null);
     }
 }
 
