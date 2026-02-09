@@ -111,4 +111,6 @@ export const getGitHubConnectionMethods = () => featureFlags.github.connectionMe
 
 export const isGitHubOAuthEnabled = () => featureFlags.github.connectionMethods.oauth;
 
+export const isGitHubPATEnabled = () => true;
+
 export default featureFlags;
