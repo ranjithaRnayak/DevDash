@@ -22,12 +22,17 @@ public class RateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Skip rate limiting for localhost/development
-        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "";
-        var isLocalhost = remoteIp == "::1" || remoteIp == "127.0.0.1" || remoteIp.StartsWith("192.168.");
-        var skipRateLimiting = _configuration.GetValue<bool>("RateLimiting:DisableForLocalhost", true);
+        // Check authentication type - skip rate limiting for PAT auth, apply for Entra ID
+        var authType = context.User.FindFirst("auth_type")?.Value
+                       ?? context.Request.Headers["X-Auth-Type"].FirstOrDefault()
+                       ?? "";
 
-        if (isLocalhost && skipRateLimiting)
+        var isPATAuth = authType.Equals("PAT", StringComparison.OrdinalIgnoreCase)
+                        || context.Request.Headers.ContainsKey("X-PAT-Token")
+                        || !context.User.Identity?.IsAuthenticated == true;
+
+        // Skip rate limiting for PAT authentication (local dev), apply for Entra ID (production)
+        if (isPATAuth)
         {
             await _next(context);
             return;
