@@ -1335,3 +1335,210 @@ input:checked + .slider {
         font-size: 16px;
     }
 }
+
+/* ====================== */
+/* AI Assistant */
+/* ====================== */
+.ai-assistant-card {
+    position: relative;
+}
+
+.ai-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.ai-header h2 {
+    margin: 0;
+}
+
+.ai-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ai-provider-select {
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #e2e8f0;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.ai-provider-select:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+.ai-source-badge {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.ai-source-badge.azureopenai {
+    background: rgba(0, 120, 212, 0.2);
+    color: #0078d4;
+}
+
+.ai-source-badge.copilot {
+    background: rgba(134, 97, 193, 0.2);
+    color: #8661c1;
+}
+
+.ai-source-badge.mock,
+.ai-source-badge.fallback {
+    background: rgba(251, 191, 36, 0.2);
+    color: #fbbf24;
+}
+
+.ai-query-box {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.query-input {
+    flex: 1;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #e2e8f0;
+    font-size: 14px;
+}
+
+.query-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+}
+
+.query-input::placeholder {
+    color: #64748b;
+}
+
+.quick-actions {
+    display: flex;
+    gap: 8px;
+    margin: 12px 0;
+    flex-wrap: wrap;
+}
+
+.quick-action-btn {
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    color: #94a3b8;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.quick-action-btn:hover {
+    background: rgba(34, 197, 94, 0.15);
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
+}
+
+.quick-action-btn.clear-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+.ai-error {
+    padding: 8px 12px;
+    background: rgba(251, 191, 36, 0.15);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 6px;
+    color: #fbbf24;
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+.related-issues,
+.suggested-resolutions,
+.copilot-context {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.related-issues h4,
+.suggested-resolutions h4,
+.copilot-context h4 {
+    color: #94a3b8;
+    font-size: 13px;
+    margin: 0 0 12px 0;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.related-issues ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.related-issue-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    margin-bottom: 6px;
+}
+
+.issue-title {
+    color: #e2e8f0;
+    font-size: 14px;
+}
+
+.issue-score {
+    color: #22c55e;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.resolution-item {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 12px;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.resolution-item strong {
+    color: #22c55e;
+    font-size: 14px;
+}
+
+.resolution-item p {
+    color: #94a3b8;
+    font-size: 13px;
+    margin: 8px 0;
+}
+
+.resolution-steps {
+    color: #e2e8f0;
+    font-size: 13px;
+    padding-left: 20px;
+    margin: 8px 0 0 0;
+}
+
+.resolution-steps li {
+    margin-bottom: 4px;
+}
+
+.context-info {
+    font-size: 12px;
+    color: #64748b;
+}

@@ -92,4 +92,35 @@ export const healthAPI = {
   status: () => apiClient.get('/health/status'),
 };
 
+// ==================== Copilot API ====================
+
+export const copilotAPI = {
+  chat: (request) => apiClient.post('/copilot/chat', request),
+  getContext: (dashboardId) =>
+    apiClient.get(`/copilot/context${dashboardId ? `?dashboardId=${dashboardId}` : ''}`),
+  getStatus: () => apiClient.get('/copilot/status'),
+};
+
+// ==================== Lighthouse API ====================
+
+export const lighthouseAPI = {
+  getStatus: () => apiClient.get('/lighthouse/status'),
+  getBranches: () => apiClient.get('/lighthouse/branches'),
+  getBranchResult: (branch) => apiClient.get(`/lighthouse/branch/${encodeURIComponent(branch)}`),
+  getBranchHistory: (branch, limit = 10) =>
+    apiClient.get(`/lighthouse/branch/${encodeURIComponent(branch)}/history?limit=${limit}`),
+  runAudit: (branch, deploymentUrl) =>
+    apiClient.post('/lighthouse/audit', { branch, deploymentUrl }),
+};
+
+// ==================== Performance API ====================
+
+export const performanceAPI = {
+  getDashboard: () => apiClient.get('/performance/dashboard'),
+  getDraftPRs: () => apiClient.get('/performance/draft-prs'),
+  getCommits: () => apiClient.get('/performance/commits'),
+  getStoryPoints: () => apiClient.get('/performance/story-points'),
+  scheduleReview: (prDetails) => apiClient.post('/performance/schedule-review', prDetails),
+};
+
 export default apiClient;
