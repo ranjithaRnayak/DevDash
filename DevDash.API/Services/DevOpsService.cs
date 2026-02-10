@@ -59,6 +59,12 @@ public class AzureDevOpsService : IDevOpsService
 
         if (!string.IsNullOrEmpty(orgUrl))
         {
+            // Ensure trailing slash for proper URL resolution with relative URIs
+            // Without trailing slash, HttpClient replaces the last segment instead of appending
+            if (!orgUrl.EndsWith("/"))
+            {
+                orgUrl += "/";
+            }
             _httpClient.BaseAddress = new Uri(orgUrl);
         }
 
