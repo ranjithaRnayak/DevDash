@@ -53,21 +53,20 @@ const PRAlerts = ({ dashboardId, repos }) => {
             return pr.webUrl;
         }
 
-        // Fallback to url if webUrl not available
-        if (pr.url && (pr.url.startsWith('http://') || pr.url.startsWith('https://'))) {
+        // Fallback to url if webUrl not available and it's not an API URL
+        if (pr.url && (pr.url.startsWith('http://') || pr.url.startsWith('https://')) && !pr.url.includes('/_apis/')) {
             return pr.url;
         }
 
         // Construct URL based on source as last resort
         if (pr.source === 'GitHub' && pr.repository) {
-            return `https://github.com/${pr.repository}/pull/${pr.id}`;
+            return `https://github.com/${pr.repository}/pull/${pr.number}`;
         }
 
-        if (pr.source === 'AzureDevOps' && pr.repository) {
-            return `https://dev.azure.com/_git/${pr.repository}/pullrequest/${pr.id}`;
-        }
+        // For Azure DevOps, the backend should now provide proper webUrl
+        // Don't construct a fallback URL as we don't have enough info
 
-        return pr.url || pr.webUrl || null;
+        return pr.webUrl || null;
     };
 
     // Handle overdue/draft label click - send email reminder
@@ -132,8 +131,9 @@ const PRAlerts = ({ dashboardId, repos }) => {
                     allPRs.map((pr, index) => {
                         const created = new Date(pr.createdAt);
                         const hoursOpen = (Date.now() - created.getTime()) / (1000 * 60 * 60);
-                        const isOverdue = hoursOpen > 48;
+                        const isOverdue = hoursOpen > 48 && !pr.isDraft;
                         const isDraft = pr.isDraft === true || pr.status === 'Draft';
+                        const isGitHub = pr.source === 'GitHub';
 
                         const reviewerEmails = pr.reviewers
                             ?.map(r => r.uniqueName || r.email || '')
@@ -181,12 +181,12 @@ const PRAlerts = ({ dashboardId, repos }) => {
                                                 borderRadius: '4px',
                                                 fontSize: '10px',
                                                 fontWeight: '500',
-                                                backgroundColor: pr.source === 'GitHub' ? 'rgba(35, 134, 54, 0.2)' : 'rgba(0, 120, 212, 0.2)',
-                                                color: pr.source === 'GitHub' ? '#238636' : '#0078d4',
-                                                border: pr.source === 'GitHub' ? '1px solid rgba(35, 134, 54, 0.4)' : '1px solid rgba(0, 120, 212, 0.4)'
+                                                backgroundColor: isGitHub ? 'rgba(35, 134, 54, 0.2)' : 'rgba(0, 120, 212, 0.2)',
+                                                color: isGitHub ? '#238636' : '#0078d4',
+                                                border: isGitHub ? '1px solid rgba(35, 134, 54, 0.4)' : '1px solid rgba(0, 120, 212, 0.4)'
                                             }}
                                         >
-                                            {pr.source === 'GitHub' ? 'GitHub' : 'Azure'}
+                                            {isGitHub ? 'GitHub' : 'Azure'}
                                         </span>
                                         {isDraft && (
                                             <span

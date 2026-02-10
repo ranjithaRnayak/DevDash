@@ -193,21 +193,33 @@ public class AzureDevOpsService : IDevOpsService
         };
     }
 
-    private static PullRequest MapToPullRequest(AzDoPR pr)
+    private PullRequest MapToPullRequest(AzDoPR pr)
     {
+        var orgUrl = _configuration["AzureDevOps:OrganizationUrl"]?.TrimEnd('/');
+        var projectName = pr.Repository?.Project?.Name ?? _configuration["AzureDevOps:Project"];
+        var repoName = pr.Repository?.Name ?? "";
+
+        // Construct proper web URL for Azure DevOps PR
+        var webUrl = !string.IsNullOrEmpty(orgUrl) && !string.IsNullOrEmpty(projectName) && !string.IsNullOrEmpty(repoName)
+            ? $"{orgUrl}/{projectName}/_git/{repoName}/pullrequest/{pr.PullRequestId}"
+            : null;
+
         return new PullRequest
         {
             Id = pr.PullRequestId.ToString(),
             Number = pr.PullRequestId,
             Title = pr.Title,
             Description = pr.Description ?? "",
-            Status = MapPRStatus(pr.Status),
+            Status = pr.IsDraft ? PRStatus.Draft : MapPRStatus(pr.Status),
             SourceBranch = pr.SourceRefName?.Replace("refs/heads/", "") ?? "",
             TargetBranch = pr.TargetRefName?.Replace("refs/heads/", "") ?? "",
             Author = pr.CreatedBy?.DisplayName ?? "Unknown",
             CreatedAt = pr.CreationDate,
             Source = PRSource.AzureDevOps,
-            Url = pr.Url
+            IsDraft = pr.IsDraft,
+            Url = webUrl ?? pr.Url,
+            WebUrl = webUrl,
+            Repository = repoName
         };
     }
 
@@ -268,11 +280,26 @@ public class AzureDevOpsService : IDevOpsService
         public string? Title { get; set; }
         public string? Description { get; set; }
         public string? Status { get; set; }
+        public bool IsDraft { get; set; }
         public string? SourceRefName { get; set; }
         public string? TargetRefName { get; set; }
         public DateTime CreationDate { get; set; }
         public AzDoIdentity? CreatedBy { get; set; }
         public string? Url { get; set; }
+        public AzDoPRRepository? Repository { get; set; }
+    }
+
+    private class AzDoPRRepository
+    {
+        public string? Id { get; set; }
+        public string? Name { get; set; }
+        public AzDoPRProject? Project { get; set; }
+    }
+
+    private class AzDoPRProject
+    {
+        public string? Id { get; set; }
+        public string? Name { get; set; }
     }
 }
 
@@ -385,15 +412,18 @@ public class GitHubService : IGitHubService
         }
     }
 
-    private static PullRequest MapToPullRequest(GitHubPR pr)
+    private PullRequest MapToPullRequest(GitHubPR pr)
     {
+        var owner = _configuration["GitHub:Owner"];
+        var repo = _configuration["GitHub:Repo"];
+
         return new PullRequest
         {
             Id = pr.Id.ToString(),
             Number = pr.Number,
             Title = pr.Title ?? "",
             Description = pr.Body ?? "",
-            Status = MapPRState(pr.State, pr.MergedAt),
+            Status = pr.Draft ? PRStatus.Draft : MapPRState(pr.State, pr.MergedAt),
             SourceBranch = pr.Head?.Ref ?? "",
             TargetBranch = pr.Base?.Ref ?? "",
             Author = pr.User?.Login ?? "Unknown",
@@ -403,7 +433,10 @@ public class GitHubService : IGitHubService
             MergedAt = pr.MergedAt,
             ClosedAt = pr.ClosedAt,
             Url = pr.HtmlUrl,
+            WebUrl = pr.HtmlUrl,
+            Repository = $"{owner}/{repo}",
             Source = PRSource.GitHub,
+            IsDraft = pr.Draft,
             AdditionsCount = pr.Additions,
             DeletionsCount = pr.Deletions,
             ChangedFilesCount = pr.ChangedFiles
@@ -444,6 +477,7 @@ public class GitHubService : IGitHubService
         public string? Title { get; set; }
         public string? Body { get; set; }
         public string? State { get; set; }
+        public bool Draft { get; set; }
         public GitHubRef? Head { get; set; }
         public GitHubRef? Base { get; set; }
         public GitHubUser? User { get; set; }

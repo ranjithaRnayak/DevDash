@@ -74,9 +74,12 @@ public class PullRequest
     public DateTime? MergedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
     public string? Url { get; set; }
+    public string? WebUrl { get; set; }
+    public string? Repository { get; set; }
     public List<PRReviewer> Reviewers { get; set; } = new();
     public List<PRComment> Comments { get; set; } = new();
     public PRSource Source { get; set; }
+    public bool IsDraft { get; set; }
     public bool HasConflicts { get; set; }
     public int AdditionsCount { get; set; }
     public int DeletionsCount { get; set; }
