@@ -437,7 +437,7 @@ public class AzureDevOpsService : IDevOpsService
     private class AzDoBuild
     {
         public int Id { get; set; }
-        public int BuildNumber { get; set; }
+        public string? BuildNumber { get; set; }
         public string? Status { get; set; }
         public string? Result { get; set; }
         public string? SourceBranch { get; set; }
