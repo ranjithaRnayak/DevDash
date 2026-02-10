@@ -95,15 +95,10 @@ public class AzureDevOpsService : IDevOpsService
             var response = await _httpClient.GetAsync(requestUrl);
 
             _logger.LogInformation("Build API response status: {StatusCode}", response.StatusCode);
-
-            // Log raw response for debugging
-            var rawContent = await response.Content.ReadAsStringAsync();
-            _logger.LogInformation("Build API raw response (first 500 chars): {Content}",
-                rawContent.Length > 500 ? rawContent.Substring(0, 500) : rawContent);
-
             response.EnsureSuccessStatusCode();
 
-            var result = System.Text.Json.JsonSerializer.Deserialize<AzDoBuildsResponse>(rawContent);
+            // Use ReadFromJsonAsync which is case-insensitive by default
+            var result = await response.Content.ReadFromJsonAsync<AzDoBuildsResponse>();
             _logger.LogInformation("Parsed builds count: {Count}", result?.Value?.Count ?? 0);
 
             var builds = result?.Value?.Select(MapToPipelineBuild).ToList() ?? new List<PipelineBuild>();
