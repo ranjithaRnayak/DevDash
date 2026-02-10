@@ -13,17 +13,20 @@ public class DevOpsController : ControllerBase
     private readonly IDevOpsService _devOpsService;
     private readonly IGitHubService _gitHubService;
     private readonly ICacheService _cacheService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<DevOpsController> _logger;
 
     public DevOpsController(
         IDevOpsService devOpsService,
         IGitHubService gitHubService,
         ICacheService cacheService,
+        IConfiguration configuration,
         ILogger<DevOpsController> logger)
     {
         _devOpsService = devOpsService;
         _gitHubService = gitHubService;
         _cacheService = cacheService;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -240,5 +243,85 @@ public class DevOpsController : ControllerBase
     {
         public string BuildId { get; set; } = string.Empty;
         public string Logs { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Get PRAlerts configuration including team members
+    /// </summary>
+    [HttpGet("pralerts/config")]
+    public async Task<ActionResult<PRAlertsConfig>> GetPRAlertsConfig()
+    {
+        try
+        {
+            var cacheKey = "pralerts:config";
+            var cached = await _cacheService.GetAsync<PRAlertsConfig>(cacheKey);
+            if (cached != null)
+            {
+                return Ok(cached);
+            }
+
+            // Get configuration from appsettings
+            var config = new PRAlertsConfig
+            {
+                OverdueHours = _configuration.GetValue<int>("PRAlerts:OverdueHours", 48),
+                StalePRDays = _configuration.GetValue<int>("PRAlerts:StalePRDays", 7),
+                RequiredApprovers = _configuration.GetValue<int>("PRAlerts:RequiredApprovers", 2),
+                OverdueEmail = new OverdueEmailConfig
+                {
+                    To = _configuration.GetSection("PRAlerts:OverdueEmail:To").Get<List<string>>() ?? new List<string>(),
+                    Cc = _configuration.GetSection("PRAlerts:OverdueEmail:Cc").Get<List<string>>() ?? new List<string>(),
+                    Subject = _configuration.GetValue<string>("PRAlerts:OverdueEmail:Subject") ?? "Overdue PR Alert - Action Required"
+                }
+            };
+
+            // Fetch team members from Azure DevOps and GitHub
+            var azdoMembersTask = _devOpsService.GetTeamMembersAsync();
+            var githubMembersTask = _gitHubService.GetOrganizationMembersAsync();
+
+            await Task.WhenAll(azdoMembersTask, githubMembersTask);
+
+            config.TeamMembers = azdoMembersTask.Result
+                .Concat(githubMembersTask.Result)
+                .GroupBy(m => m.Email?.ToLower() ?? m.UniqueName?.ToLower() ?? m.Id)
+                .Select(g => g.First()) // Deduplicate by email/uniqueName
+                .ToList();
+
+            await _cacheService.SetAsync(cacheKey, config, TimeSpan.FromMinutes(15));
+            return Ok(config);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch PRAlerts config");
+            return StatusCode(500, new { error = "Failed to fetch PRAlerts configuration" });
+        }
+    }
+
+    /// <summary>
+    /// Get team members from Azure DevOps and GitHub
+    /// </summary>
+    [HttpGet("team/members")]
+    public async Task<ActionResult<List<TeamMember>>> GetTeamMembers()
+    {
+        try
+        {
+            var azdoMembersTask = _devOpsService.GetTeamMembersAsync();
+            var githubMembersTask = _gitHubService.GetOrganizationMembersAsync();
+
+            await Task.WhenAll(azdoMembersTask, githubMembersTask);
+
+            var allMembers = azdoMembersTask.Result
+                .Concat(githubMembersTask.Result)
+                .GroupBy(m => m.Email?.ToLower() ?? m.UniqueName?.ToLower() ?? m.Id)
+                .Select(g => g.First()) // Deduplicate
+                .OrderBy(m => m.DisplayName)
+                .ToList();
+
+            return Ok(allMembers);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch team members");
+            return StatusCode(500, new { error = "Failed to fetch team members" });
+        }
     }
 }

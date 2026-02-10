@@ -5,24 +5,32 @@ const PRAlerts = ({ dashboardId, repos }) => {
     const [allPRs, setAllPRs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [prAlertsConfig, setPrAlertsConfig] = useState(null);
     const hasFetched = useRef(false);
 
     useEffect(() => {
         if (hasFetched.current) return;
         hasFetched.current = true;
 
-        const fetchPRs = async () => {
+        const fetchData = async () => {
             setLoading(true);
             setError(null);
             try {
-                const response = await devOpsAPI.getPullRequests('open');
-                const prs = response.data || [];
+                // Fetch PRs and config in parallel
+                const [prsResponse, configResponse] = await Promise.all([
+                    devOpsAPI.getPullRequests('open'),
+                    devOpsAPI.getPRAlertsConfig().catch(() => ({ data: null }))
+                ]);
+
+                const prs = prsResponse.data || [];
+                const config = configResponse.data;
 
                 // Include all PRs (including drafts), sort by created date
                 const activePRs = prs
                     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
                 setAllPRs(activePRs);
+                setPrAlertsConfig(config);
             } catch (err) {
                 console.error('Failed to fetch pull requests:', err);
                 setError(err.message || 'Failed to fetch PRs');
@@ -32,8 +40,11 @@ const PRAlerts = ({ dashboardId, repos }) => {
             }
         };
 
-        fetchPRs();
+        fetchData();
     }, []);
+
+    // Get overdue hours from config or default to 48
+    const overdueHours = prAlertsConfig?.overdueHours || 48;
 
     // Handle PR row click - open the actual PR URL
     const handlePRClick = (pr, e) => {
@@ -69,23 +80,65 @@ const PRAlerts = ({ dashboardId, repos }) => {
         return pr.webUrl || null;
     };
 
+    // Build email recipients list combining PR reviewers, team members, and config
+    const buildEmailRecipients = (pr) => {
+        const configuredTo = prAlertsConfig?.overdueEmail?.to || [];
+        const configuredCc = prAlertsConfig?.overdueEmail?.cc || [];
+        const teamMembers = prAlertsConfig?.teamMembers || [];
+
+        // Get reviewer emails from the PR
+        const reviewerEmails = pr.reviewers
+            ?.map(r => r.email || r.uniqueName || '')
+            .filter(Boolean) || [];
+
+        // Get author email
+        const authorEmail = pr.authorEmail || pr.createdBy?.email || pr.createdBy?.uniqueName || '';
+
+        // Get team member emails
+        const teamEmails = teamMembers
+            .map(m => m.email || m.uniqueName || '')
+            .filter(Boolean);
+
+        // Build TO list: configured To + reviewers (if any)
+        const toEmails = [...new Set([...configuredTo, ...reviewerEmails])].filter(Boolean);
+
+        // Build CC list: configured Cc + team members + author
+        const ccEmails = [...new Set([
+            ...configuredCc,
+            ...teamEmails,
+            authorEmail
+        ])].filter(Boolean);
+
+        // Remove duplicates between TO and CC (keep in TO only)
+        const finalCcEmails = ccEmails.filter(email => !toEmails.includes(email));
+
+        return {
+            to: toEmails.join(','),
+            cc: finalCcEmails.join(',')
+        };
+    };
+
     // Handle overdue/draft label click - send email reminder
-    const handleLabelClick = (e, pr, reviewerEmails, authorEmail, subject, body) => {
+    const handleLabelClick = (e, pr, isDraft) => {
         e.preventDefault();
         e.stopPropagation();
 
-        // Build mailto with To (reviewers) and CC (author)
-        const toList = reviewerEmails || '';
-        const ccList = authorEmail || '';
+        const { to, cc } = buildEmailRecipients(pr);
+
+        const subject = isDraft
+            ? `Reminder: Draft PR Ready for Review - ${pr.title}`
+            : prAlertsConfig?.overdueEmail?.subject || `Reminder: Review Pending PR - ${pr.title}`;
+
+        const body = `Hi Team,%0D%0A%0D%0A${isDraft ? 'This draft PR may need attention:' : `This PR is pending for over ${overdueHours} hours:`}%0D%0A${pr.title}%0D%0A${getPRUrl(pr) || ''}%0D%0APlease review it when you get a chance.%0D%0A%0D%0AThanks,%0D%0ADevDash`;
 
         let mailtoUrl = 'mailto:';
-        if (toList) {
-            mailtoUrl += toList;
+        if (to) {
+            mailtoUrl += to;
         }
 
         const params = [];
-        if (ccList) {
-            params.push(`cc=${encodeURIComponent(ccList)}`);
+        if (cc) {
+            params.push(`cc=${encodeURIComponent(cc)}`);
         }
         params.push(`subject=${encodeURIComponent(subject)}`);
         params.push(`body=${body}`);
@@ -131,21 +184,9 @@ const PRAlerts = ({ dashboardId, repos }) => {
                     allPRs.map((pr, index) => {
                         const created = new Date(pr.createdAt);
                         const hoursOpen = (Date.now() - created.getTime()) / (1000 * 60 * 60);
-                        const isOverdue = hoursOpen > 48; // Show overdue for all PRs including drafts
+                        const isOverdue = hoursOpen > overdueHours; // Use config value
                         const isDraft = pr.isDraft === true || pr.status === 'Draft';
                         const isGitHub = pr.source === 'GitHub';
-
-                        const reviewerEmails = pr.reviewers
-                            ?.map(r => r.email || r.uniqueName || '')
-                            .filter(Boolean)
-                            .join(',') || '';
-
-                        const authorEmail = pr.authorEmail || pr.createdBy?.email || pr.createdBy?.uniqueName || '';
-
-                        const subject = isDraft
-                            ? `Reminder: Draft PR Ready for Review - ${pr.title}`
-                            : `Reminder: Review Pending PR - ${pr.title}`;
-                        const body = `Hi Team,%0D%0A%0D%0A${isDraft ? 'This draft PR may need attention:' : 'This PR is pending for over 48 hours:'}%0D%0A${pr.title}%0D%0A${getPRUrl(pr) || ''}%0D%0APlease review it when you get a chance.%0D%0A%0D%0AThanks,%0D%0ADevDash`;
 
                         // Determine shadow color based on status
                         const getRowShadow = () => {
@@ -191,7 +232,7 @@ const PRAlerts = ({ dashboardId, repos }) => {
                                         {isDraft && (
                                             <span
                                                 className="draft-label"
-                                                onClick={(e) => handleLabelClick(e, pr, reviewerEmails, authorEmail, subject, body)}
+                                                onClick={(e) => handleLabelClick(e, pr, true)}
                                                 title="Click to send reminder email"
                                                 style={{
                                                     cursor: 'pointer',
@@ -211,11 +252,11 @@ const PRAlerts = ({ dashboardId, repos }) => {
                                         {isOverdue && (
                                             <span
                                                 className="warning-label"
-                                                onClick={(e) => handleLabelClick(e, pr, reviewerEmails, authorEmail, subject, body)}
+                                                onClick={(e) => handleLabelClick(e, pr, false)}
                                                 title="Click to send reminder email"
                                                 style={{ cursor: 'pointer' }}
                                             >
-                                                Over 48 hrs
+                                                Over {overdueHours} hrs
                                             </span>
                                         )}
                                     </div>

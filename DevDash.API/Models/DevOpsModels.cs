@@ -176,3 +176,35 @@ public class DashboardSummary
     public List<PullRequest> RecentPRs { get; set; } = new();
     public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// PR Alerts configuration from appsettings
+/// </summary>
+public class PRAlertsConfig
+{
+    public int OverdueHours { get; set; } = 48;
+    public int StalePRDays { get; set; } = 7;
+    public int RequiredApprovers { get; set; } = 2;
+    public OverdueEmailConfig? OverdueEmail { get; set; }
+    public List<TeamMember> TeamMembers { get; set; } = new();
+}
+
+public class OverdueEmailConfig
+{
+    public List<string> To { get; set; } = new();
+    public List<string> Cc { get; set; } = new();
+    public string Subject { get; set; } = "Overdue PR Alert - Action Required";
+}
+
+/// <summary>
+/// Team member information
+/// </summary>
+public class TeamMember
+{
+    public string Id { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? UniqueName { get; set; }
+    public string? AvatarUrl { get; set; }
+    public string Source { get; set; } = string.Empty; // "AzureDevOps" or "GitHub"
+}

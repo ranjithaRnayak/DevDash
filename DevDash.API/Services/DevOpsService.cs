@@ -13,6 +13,7 @@ public interface IDevOpsService
     Task<PipelineBuild?> GetBuildAsync(string buildId);
     Task<List<PullRequest>> GetPullRequestsAsync(PRStatus? status = null);
     Task<string?> GetBuildLogsAsync(string buildId);
+    Task<List<TeamMember>> GetTeamMembersAsync();
 }
 
 /// <summary>
@@ -23,6 +24,7 @@ public interface IGitHubService
     Task<List<PullRequest>> GetPullRequestsAsync(string state = "open");
     Task<PullRequest?> GetPullRequestAsync(int prNumber);
     Task<List<PRComment>> GetPRCommentsAsync(int prNumber);
+    Task<List<TeamMember>> GetOrganizationMembersAsync();
 }
 
 /// <summary>
@@ -174,6 +176,67 @@ public class AzureDevOpsService : IDevOpsService
         }
     }
 
+    public async Task<List<TeamMember>> GetTeamMembersAsync()
+    {
+        var cacheKey = "azdo:team:members";
+        var cached = await _cacheService.GetAsync<List<TeamMember>>(cacheKey);
+        if (cached != null)
+        {
+            return cached;
+        }
+
+        try
+        {
+            var project = _configuration["AzureDevOps:Project"];
+
+            // First, get the default team for the project
+            var teamsResponse = await _httpClient.GetAsync($"{project}/_apis/teams?api-version=7.0");
+            if (!teamsResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch Azure DevOps teams: {StatusCode}", teamsResponse.StatusCode);
+                return new List<TeamMember>();
+            }
+
+            var teamsResult = await teamsResponse.Content.ReadFromJsonAsync<AzDoTeamsResponse>();
+            var defaultTeam = teamsResult?.Value?.FirstOrDefault();
+
+            if (defaultTeam == null)
+            {
+                _logger.LogWarning("No teams found in Azure DevOps project {Project}", project);
+                return new List<TeamMember>();
+            }
+
+            // Get team members
+            var membersResponse = await _httpClient.GetAsync(
+                $"{project}/_apis/projects/{project}/teams/{defaultTeam.Id}/members?api-version=7.0");
+
+            if (!membersResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch team members: {StatusCode}", membersResponse.StatusCode);
+                return new List<TeamMember>();
+            }
+
+            var membersResult = await membersResponse.Content.ReadFromJsonAsync<AzDoTeamMembersResponse>();
+            var members = membersResult?.Value?.Select(m => new TeamMember
+            {
+                Id = m.Identity?.Id ?? "",
+                DisplayName = m.Identity?.DisplayName ?? "",
+                Email = m.Identity?.UniqueName,
+                UniqueName = m.Identity?.UniqueName,
+                AvatarUrl = m.Identity?.ImageUrl,
+                Source = "AzureDevOps"
+            }).ToList() ?? new List<TeamMember>();
+
+            await _cacheService.SetAsync(cacheKey, members, TimeSpan.FromMinutes(30));
+            return members;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch Azure DevOps team members");
+            return new List<TeamMember>();
+        }
+    }
+
     private static PipelineBuild MapToPipelineBuild(AzDoBuild build)
     {
         return new PipelineBuild
@@ -284,6 +347,19 @@ public class AzureDevOpsService : IDevOpsService
     // Azure DevOps API response models
     private class AzDoBuildsResponse { public List<AzDoBuild>? Value { get; set; } }
     private class AzDoPRsResponse { public List<AzDoPR>? Value { get; set; } }
+    private class AzDoTeamsResponse { public List<AzDoTeam>? Value { get; set; } }
+    private class AzDoTeamMembersResponse { public List<AzDoTeamMember>? Value { get; set; } }
+
+    private class AzDoTeam
+    {
+        public string? Id { get; set; }
+        public string? Name { get; set; }
+    }
+
+    private class AzDoTeamMember
+    {
+        public AzDoIdentity? Identity { get; set; }
+    }
 
     private class AzDoBuild
     {
@@ -515,6 +591,104 @@ public class GitHubService : IGitHubService
         {
             _logger.LogError(ex, "Failed to fetch comments for PR {PRNumber}", prNumber);
             return new List<PRComment>();
+        }
+    }
+
+    public async Task<List<TeamMember>> GetOrganizationMembersAsync()
+    {
+        var cacheKey = "github:org:members";
+        var cached = await _cacheService.GetAsync<List<TeamMember>>(cacheKey);
+        if (cached != null)
+        {
+            return cached;
+        }
+
+        try
+        {
+            var owner = _configuration["GitHub:Owner"];
+            if (string.IsNullOrEmpty(owner))
+            {
+                _logger.LogWarning("GitHub Owner not configured");
+                return new List<TeamMember>();
+            }
+
+            // Try to get organization members (requires org:read scope)
+            var response = await _httpClient.GetAsync($"/orgs/{owner}/members");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                // Fallback: try to get collaborators from repos
+                _logger.LogWarning("Could not fetch org members (may need org:read scope), trying repo collaborators");
+                return await GetRepoCollaboratorsAsync(owner);
+            }
+
+            var members = await response.Content.ReadFromJsonAsync<List<GitHubUser>>();
+            var teamMembers = members?.Select(m => new TeamMember
+            {
+                Id = m.Id?.ToString() ?? "",
+                DisplayName = m.Login ?? "",
+                Email = m.Email ?? (m.Login != null ? $"{m.Login}@users.noreply.github.com" : null),
+                UniqueName = m.Login,
+                AvatarUrl = m.AvatarUrl,
+                Source = "GitHub"
+            }).ToList() ?? new List<TeamMember>();
+
+            await _cacheService.SetAsync(cacheKey, teamMembers, TimeSpan.FromMinutes(30));
+            return teamMembers;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch GitHub organization members");
+            return new List<TeamMember>();
+        }
+    }
+
+    private async Task<List<TeamMember>> GetRepoCollaboratorsAsync(string owner)
+    {
+        try
+        {
+            var repoConfig = _configuration["GitHub:Repo"]
+                ?? _configuration["GitHub:Dev:Repos"]
+                ?? _configuration["GitHub:Test:Repos"]
+                ?? "";
+
+            var repos = repoConfig.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var allCollaborators = new Dictionary<string, TeamMember>();
+
+            foreach (var repo in repos.Take(3)) // Limit to first 3 repos to avoid rate limiting
+            {
+                var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/collaborators");
+                if (response.IsSuccessStatusCode)
+                {
+                    var collaborators = await response.Content.ReadFromJsonAsync<List<GitHubUser>>();
+                    if (collaborators != null)
+                    {
+                        foreach (var c in collaborators)
+                        {
+                            if (c.Login != null && !allCollaborators.ContainsKey(c.Login))
+                            {
+                                allCollaborators[c.Login] = new TeamMember
+                                {
+                                    Id = c.Id?.ToString() ?? "",
+                                    DisplayName = c.Login,
+                                    Email = c.Email ?? $"{c.Login}@users.noreply.github.com",
+                                    UniqueName = c.Login,
+                                    AvatarUrl = c.AvatarUrl,
+                                    Source = "GitHub"
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+
+            return allCollaborators.Values.ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch repo collaborators");
+            return new List<TeamMember>();
         }
     }
 
