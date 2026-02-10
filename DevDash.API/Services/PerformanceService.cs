@@ -86,6 +86,7 @@ public class PerformanceService : IPerformanceService
 
     /// <summary>
     /// Get the authenticated Azure DevOps user by calling /_apis/connectionData
+    /// Returns a fallback user if API fails (PAT mode without valid Azure DevOps config)
     /// </summary>
     public async Task<AzDoUserInfo> GetAuthenticatedAzDoUserAsync()
     {
@@ -99,6 +100,16 @@ public class PerformanceService : IPerformanceService
 
         try
         {
+            // Check if Azure DevOps is configured
+            var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
+            var pat = _configuration["AzureDevOps:PAT"];
+
+            if (string.IsNullOrEmpty(orgUrl) || string.IsNullOrEmpty(pat))
+            {
+                _logger.LogWarning("Azure DevOps not configured - returning fallback user");
+                return GetFallbackUser();
+            }
+
             var response = await _azDoClient.GetAsync("_apis/connectionData?api-version=7.0");
             response.EnsureSuccessStatusCode();
 
@@ -106,7 +117,8 @@ public class PerformanceService : IPerformanceService
 
             if (data?.AuthenticatedUser == null)
             {
-                throw new InvalidOperationException("Could not resolve authenticated user from Azure DevOps");
+                _logger.LogWarning("Could not resolve authenticated user from Azure DevOps - returning fallback");
+                return GetFallbackUser();
             }
 
             var userInfo = new AzDoUserInfo
@@ -125,9 +137,20 @@ public class PerformanceService : IPerformanceService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get authenticated Azure DevOps user");
-            throw;
+            _logger.LogError(ex, "Failed to get authenticated Azure DevOps user - returning fallback");
+            return GetFallbackUser();
         }
+    }
+
+    private AzDoUserInfo GetFallbackUser()
+    {
+        return new AzDoUserInfo
+        {
+            Id = "pat-user",
+            DisplayName = "PAT User",
+            Email = "pat-user@local",
+            UniqueName = "pat-user"
+        };
     }
 
     /// <summary>
