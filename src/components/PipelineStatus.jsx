@@ -4,41 +4,8 @@ import { devOpsAPI } from '../api/backendClient';
 const PipelineStatus = ({ dashboardId, pipelines }) => {
     const [builds, setBuilds] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const hasFetched = useRef(false);
-
-    // Mock data for when API is unavailable
-    const getMockBuilds = () => [
-        {
-            id: 1,
-            pipelineName: 'CI-Build',
-            buildNumber: '20240210.1',
-            result: 'Succeeded',
-            status: 'Completed',
-            sourceBranch: 'refs/heads/main',
-            finishTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-            url: 'https://dev.azure.com/org/project/_build/results?buildId=1'
-        },
-        {
-            id: 2,
-            pipelineName: 'CD-Deploy-Dev',
-            buildNumber: '20240210.2',
-            result: 'Failed',
-            status: 'Completed',
-            sourceBranch: 'refs/heads/feature/auth',
-            finishTime: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-            url: 'https://dev.azure.com/org/project/_build/results?buildId=2'
-        },
-        {
-            id: 3,
-            pipelineName: 'CI-Build',
-            buildNumber: '20240210.3',
-            result: 'InProgress',
-            status: 'InProgress',
-            sourceBranch: 'refs/heads/develop',
-            startTime: new Date().toISOString(),
-            url: 'https://dev.azure.com/org/project/_build/results?buildId=3'
-        }
-    ];
 
     useEffect(() => {
         if (hasFetched.current) return;
@@ -46,13 +13,14 @@ const PipelineStatus = ({ dashboardId, pipelines }) => {
 
         const fetchBuilds = async () => {
             setLoading(true);
+            setError(null);
             try {
                 const response = await devOpsAPI.getBuilds(20);
                 setBuilds(response.data || []);
-            } catch (error) {
-                console.error('Failed to fetch pipeline builds:', error);
-                // Use mock data when API fails
-                setBuilds(getMockBuilds());
+            } catch (err) {
+                console.error('Failed to fetch pipeline builds:', err);
+                setError(err.message || 'Failed to fetch builds');
+                setBuilds([]);
             } finally {
                 setLoading(false);
             }
@@ -107,6 +75,17 @@ const PipelineStatus = ({ dashboardId, pipelines }) => {
                 <div className="loading-state">
                     <div className="spinner"></div>
                     <p>Loading builds...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="pipeline-alerts-card">
+                <h2>Pipeline Builds</h2>
+                <div className="error-state" style={{ color: '#f87171', padding: '1rem' }}>
+                    <p>Error: {error}</p>
                 </div>
             </div>
         );

@@ -4,6 +4,7 @@ import { devOpsAPI } from '../api/backendClient';
 const PRAlerts = ({ dashboardId, repos }) => {
     const [allPRs, setAllPRs] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const hasFetched = useRef(false);
 
     useEffect(() => {
@@ -12,6 +13,7 @@ const PRAlerts = ({ dashboardId, repos }) => {
 
         const fetchPRs = async () => {
             setLoading(true);
+            setError(null);
             try {
                 const response = await devOpsAPI.getPullRequests('open');
                 const prs = response.data || [];
@@ -21,10 +23,10 @@ const PRAlerts = ({ dashboardId, repos }) => {
                     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
                 setAllPRs(activePRs);
-            } catch (error) {
-                console.error('Failed to fetch pull requests:', error);
-                // Use mock data when API fails
-                setAllPRs(getMockPRs());
+            } catch (err) {
+                console.error('Failed to fetch pull requests:', err);
+                setError(err.message || 'Failed to fetch PRs');
+                setAllPRs([]);
             } finally {
                 setLoading(false);
             }
@@ -32,34 +34,6 @@ const PRAlerts = ({ dashboardId, repos }) => {
 
         fetchPRs();
     }, []);
-
-    // Mock data for when API is unavailable
-    const getMockPRs = () => [
-        {
-            id: 1,
-            title: 'Feature: Add user authentication',
-            author: 'john.doe',
-            sourceBranch: 'refs/heads/feature/auth',
-            targetBranch: 'refs/heads/main',
-            status: 'Open',
-            source: 'GitHub',
-            createdAt: new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(), // 72 hours ago (overdue)
-            url: 'https://github.com/org/repo/pull/1',
-            reviewers: [{ uniqueName: 'reviewer@company.com', email: 'reviewer@company.com' }]
-        },
-        {
-            id: 2,
-            title: 'Fix: Resolve login redirect issue',
-            author: 'jane.smith',
-            sourceBranch: 'refs/heads/bugfix/login',
-            targetBranch: 'refs/heads/main',
-            status: 'Open',
-            source: 'AzureDevOps',
-            createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), // 24 hours ago
-            url: 'https://dev.azure.com/org/project/_git/repo/pullrequest/2',
-            reviewers: []
-        }
-    ];
 
     // Handle PR row click - open the actual PR URL
     const handlePRClick = (pr, e) => {
@@ -111,6 +85,17 @@ const PRAlerts = ({ dashboardId, repos }) => {
                 <div className="loading-state">
                     <div className="spinner"></div>
                     <p>Loading PRs...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="pr-alerts-card">
+                <h2>Active Pull Requests</h2>
+                <div className="error-state" style={{ color: '#f87171', padding: '1rem' }}>
+                    <p>Error: {error}</p>
                 </div>
             </div>
         );
