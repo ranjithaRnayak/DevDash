@@ -48,12 +48,17 @@ const PRAlerts = ({ dashboardId, repos }) => {
 
     // Get the correct PR URL based on source
     const getPRUrl = (pr) => {
-        // If url is already set and valid, use it
+        // Prefer webUrl (the actual PR page URL from API)
+        if (pr.webUrl && (pr.webUrl.startsWith('http://') || pr.webUrl.startsWith('https://'))) {
+            return pr.webUrl;
+        }
+
+        // Fallback to url if webUrl not available
         if (pr.url && (pr.url.startsWith('http://') || pr.url.startsWith('https://'))) {
             return pr.url;
         }
 
-        // Construct URL based on source
+        // Construct URL based on source as last resort
         if (pr.source === 'GitHub' && pr.repository) {
             return `https://github.com/${pr.repository}/pull/${pr.id}`;
         }
@@ -62,38 +67,37 @@ const PRAlerts = ({ dashboardId, repos }) => {
             return `https://dev.azure.com/_git/${pr.repository}/pullrequest/${pr.id}`;
         }
 
-        return pr.url || null;
+        return pr.url || pr.webUrl || null;
     };
 
     // Handle overdue/draft label click - send email reminder
-    const handleLabelClick = (e, pr, reviewerEmails, subject, body) => {
+    const handleLabelClick = (e, pr, reviewerEmails, authorEmail, subject, body) => {
         e.preventDefault();
         e.stopPropagation();
 
-        if (reviewerEmails) {
-            window.location.href = `mailto:${reviewerEmails}?subject=${encodeURIComponent(subject)}&body=${body}`;
-        } else {
-            // If no reviewers, open a generic email
-            window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${body}`;
+        // Build mailto with To (reviewers) and CC (author)
+        const toList = reviewerEmails || '';
+        const ccList = authorEmail || '';
+
+        let mailtoUrl = 'mailto:';
+        if (toList) {
+            mailtoUrl += toList;
         }
+
+        const params = [];
+        if (ccList) {
+            params.push(`cc=${encodeURIComponent(ccList)}`);
+        }
+        params.push(`subject=${encodeURIComponent(subject)}`);
+        params.push(`body=${body}`);
+
+        if (params.length > 0) {
+            mailtoUrl += '?' + params.join('&');
+        }
+
+        window.location.href = mailtoUrl;
     };
 
-    // Get source label style
-    const getSourceStyle = (source) => {
-        if (source === 'GitHub') {
-            return {
-                backgroundColor: 'rgba(35, 134, 54, 0.2)',
-                color: '#238636',
-                border: '1px solid rgba(35, 134, 54, 0.4)'
-            };
-        }
-        // Azure DevOps
-        return {
-            backgroundColor: 'rgba(0, 120, 212, 0.2)',
-            color: '#0078d4',
-            border: '1px solid rgba(0, 120, 212, 0.4)'
-        };
-    };
 
     if (loading) {
         return (
@@ -136,10 +140,22 @@ const PRAlerts = ({ dashboardId, repos }) => {
                             .filter(Boolean)
                             .join(',') || '';
 
+                        const authorEmail = pr.authorEmail || pr.createdBy?.uniqueName || pr.createdBy?.email || '';
+
                         const subject = isDraft
                             ? `Reminder: Draft PR Ready for Review - ${pr.title}`
                             : `Reminder: Review Pending PR - ${pr.title}`;
                         const body = `Hi Team,%0D%0A%0D%0A${isDraft ? 'This draft PR may need attention:' : 'This PR is pending for over 48 hours:'}%0D%0A${pr.title}%0D%0A${getPRUrl(pr) || ''}%0D%0APlease review it when you get a chance.%0D%0A%0D%0AThanks,%0D%0ADevDash`;
+
+                        // Determine shadow color based on status
+                        const getRowShadow = () => {
+                            if (isDraft) {
+                                return '0 2px 8px rgba(245, 158, 11, 0.4)'; // Yellow shadow for draft
+                            } else if (isOverdue) {
+                                return '0 2px 8px rgba(239, 68, 68, 0.4)'; // Red shadow for overdue
+                            }
+                            return '0 2px 8px rgba(59, 130, 246, 0.3)'; // Blue shadow for normal
+                        };
 
                         return (
                             <div
@@ -148,7 +164,8 @@ const PRAlerts = ({ dashboardId, repos }) => {
                                 onClick={(e) => handlePRClick(pr, e)}
                                 style={{
                                     cursor: 'pointer',
-                                    borderColor: isDraft ? 'rgba(245, 158, 11, 0.5)' : undefined
+                                    borderColor: isDraft ? 'rgba(245, 158, 11, 0.5)' : isOverdue ? 'rgba(239, 68, 68, 0.5)' : undefined,
+                                    boxShadow: getRowShadow()
                                 }}
                             >
                                 <div className="pr-header">
@@ -157,35 +174,30 @@ const PRAlerts = ({ dashboardId, repos }) => {
                                     </strong>
 
                                     <div className="pr-labels-container">
-                                        <span
-                                            className="source-label"
-                                            style={getSourceStyle(pr.source)}
-                                        >
-                                            {pr.source === 'AzureDevOps' ? 'Azure' : pr.source}
-                                        </span>
                                         {isDraft && (
                                             <span
                                                 className="draft-label"
-                                                onClick={(e) => handleLabelClick(e, pr, reviewerEmails, subject, body)}
+                                                onClick={(e) => handleLabelClick(e, pr, reviewerEmails, authorEmail, subject, body)}
                                                 title="Click to send reminder email"
                                                 style={{
                                                     cursor: 'pointer',
-                                                    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                                                    backgroundColor: 'rgba(245, 158, 11, 0.25)',
                                                     color: '#f59e0b',
-                                                    border: '1px solid rgba(245, 158, 11, 0.4)',
-                                                    padding: '2px 6px',
+                                                    border: '2px solid rgba(245, 158, 11, 0.6)',
+                                                    padding: '3px 8px',
                                                     borderRadius: '4px',
-                                                    fontSize: '10px',
-                                                    fontWeight: '500'
+                                                    fontSize: '11px',
+                                                    fontWeight: '700',
+                                                    letterSpacing: '0.5px'
                                                 }}
                                             >
-                                                Draft
+                                                DRAFT
                                             </span>
                                         )}
                                         {isOverdue && (
                                             <span
                                                 className="warning-label"
-                                                onClick={(e) => handleLabelClick(e, pr, reviewerEmails, subject, body)}
+                                                onClick={(e) => handleLabelClick(e, pr, reviewerEmails, authorEmail, subject, body)}
                                                 title="Click to send reminder email"
                                                 style={{ cursor: 'pointer' }}
                                             >
