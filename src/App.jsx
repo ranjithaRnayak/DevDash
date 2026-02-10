@@ -93,8 +93,13 @@ const AuthenticatedDashboardContent = () => {
                 </div>
             </div>
 
-            <div>
-                {isTestMode ? <TestDashboard /> : <Dashboard />}
+            <div className="dashboard-container">
+                <div className={`dashboard-panel ${!isTestMode ? 'active' : 'hidden'}`}>
+                    <Dashboard />
+                </div>
+                <div className={`dashboard-panel ${isTestMode ? 'active' : 'hidden'}`}>
+                    <TestDashboard />
+                </div>
             </div>
 
             {showGitHubModal && (
@@ -157,8 +162,13 @@ const PATModeDashboard = () => {
                 </div>
             </div>
 
-            <div>
-                {isTestMode ? <TestDashboard /> : <Dashboard />}
+            <div className="dashboard-container">
+                <div className={`dashboard-panel ${!isTestMode ? 'active' : 'hidden'}`}>
+                    <Dashboard />
+                </div>
+                <div className={`dashboard-panel ${isTestMode ? 'active' : 'hidden'}`}>
+                    <TestDashboard />
+                </div>
             </div>
 
             <style>{`

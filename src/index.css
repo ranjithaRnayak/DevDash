@@ -26,6 +26,31 @@ body.env-test {
     background-color: #1b324f;
 }
 
+/* Dashboard panel visibility - prevents remounting on toggle */
+.dashboard-container {
+    position: relative;
+}
+
+.dashboard-panel {
+    will-change: opacity, visibility;
+    contain: layout style;
+}
+
+.dashboard-panel.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.dashboard-panel.hidden {
+    opacity: 0;
+    visibility: hidden;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+}
+
 h1 {
     font-size: 1.8rem;
     font-weight: bold;
