@@ -82,12 +82,18 @@ public class AzureDevOpsService : IDevOpsService
         try
         {
             var project = _configuration["AzureDevOps:Project"];
-            var response = await _httpClient.GetAsync(
-                $"{project}/_apis/build/builds?$top={count}&api-version=7.0");
+            var url = $"{project}/_apis/build/builds?$top={count}&api-version=7.0";
+            _logger.LogInformation("Builds API: BaseAddress={BaseAddress}, URL={Url}", _httpClient.BaseAddress, url);
+
+            var response = await _httpClient.GetAsync(url);
+            _logger.LogInformation("Builds API response: {StatusCode}", response.StatusCode);
 
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadFromJsonAsync<AzDoBuildsResponse>();
+            _logger.LogInformation("Parsed builds: Value is null={IsNull}, Count={Count}",
+                result?.Value == null, result?.Value?.Count ?? 0);
+
             var builds = result?.Value?.Select(MapToPipelineBuild).ToList() ?? new List<PipelineBuild>();
 
             await _cacheService.SetAsync(cacheKey, builds, TimeSpan.FromMinutes(2));
