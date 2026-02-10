@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using DevDash.API.Models;
 
 namespace DevDash.API.Services;
@@ -794,7 +795,7 @@ public class GitHubService : IGitHubService
         };
     }
 
-    // GitHub API response models
+    // GitHub API response models - using JsonPropertyName to map snake_case JSON to PascalCase C#
     private class GitHubPR
     {
         public long Id { get; set; }
@@ -806,14 +807,29 @@ public class GitHubService : IGitHubService
         public GitHubRef? Head { get; set; }
         public GitHubRef? Base { get; set; }
         public GitHubUser? User { get; set; }
+
+        [JsonPropertyName("created_at")]
         public DateTime CreatedAt { get; set; }
+
+        [JsonPropertyName("updated_at")]
         public DateTime? UpdatedAt { get; set; }
+
+        [JsonPropertyName("merged_at")]
         public DateTime? MergedAt { get; set; }
+
+        [JsonPropertyName("closed_at")]
         public DateTime? ClosedAt { get; set; }
+
+        [JsonPropertyName("html_url")]
         public string? HtmlUrl { get; set; }
+
         public int Additions { get; set; }
         public int Deletions { get; set; }
+
+        [JsonPropertyName("changed_files")]
         public int ChangedFiles { get; set; }
+
+        [JsonPropertyName("requested_reviewers")]
         public List<GitHubUser>? RequestedReviewers { get; set; }
     }
 
@@ -821,7 +837,10 @@ public class GitHubService : IGitHubService
     private class GitHubUser
     {
         public string? Login { get; set; }
+
+        [JsonPropertyName("avatar_url")]
         public string? AvatarUrl { get; set; }
+
         public string? Email { get; set; }
         public long? Id { get; set; }
     }
@@ -831,6 +850,8 @@ public class GitHubService : IGitHubService
         public long Id { get; set; }
         public string? Body { get; set; }
         public GitHubUser? User { get; set; }
+
+        [JsonPropertyName("created_at")]
         public DateTime CreatedAt { get; set; }
         public string? Path { get; set; }
         public int? Line { get; set; }
