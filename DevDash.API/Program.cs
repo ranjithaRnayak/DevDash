@@ -27,13 +27,28 @@ builder.Configuration
 builder.Services.AddSingleton<IConfigurationService, ConfigurationService>();
 
 // ============================================
-// Authentication - Microsoft Entra ID
+// Authentication - PAT Mode or Microsoft Entra ID
 // ============================================
 
+var usePATToken = builder.Configuration.GetValue<bool>("FeatureFlags:UsePATToken", false);
 var entraEnabled = builder.Configuration.GetValue<bool>("Features:EnableEntraId", true);
-if (entraEnabled)
+
+if (usePATToken)
 {
+    // PAT mode - use PAT authentication handler
+    builder.Services.AddAuthentication(PATAuthenticationOptions.SchemeName)
+        .AddPATAuthentication();
+}
+else if (entraEnabled)
+{
+    // Entra ID mode - use Microsoft Identity
     builder.Services.AddMicrosoftIdentityWebApiAuthentication(builder.Configuration, "AzureAd");
+}
+else
+{
+    // No authentication - add PAT as fallback
+    builder.Services.AddAuthentication(PATAuthenticationOptions.SchemeName)
+        .AddPATAuthentication();
 }
 
 // ============================================
@@ -190,12 +205,13 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowFrontend", policy =>
     {
         var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                      ?? new[] { "http://localhost:5173" };
+                      ?? new[] { "http://localhost:5173", "http://localhost:3000", "http://localhost:5000" };
 
         policy.WithOrigins(origins)
             .AllowAnyMethod()
             .AllowAnyHeader()
-            .AllowCredentials();
+            .AllowCredentials()
+            .SetPreflightMaxAge(TimeSpan.FromMinutes(10));  // Cache preflight for 10 mins
     });
 });
 
@@ -226,9 +242,10 @@ app.UseCors("AllowFrontend");
 app.UseHttpsRedirection();
 
 app.UseMiddleware<ErrorHandlingMiddleware>();
-app.UseMiddleware<RateLimitingMiddleware>();
 
+// Authentication must come before RateLimitingMiddleware so claims are available
 app.UseAuthentication();
+app.UseMiddleware<RateLimitingMiddleware>();
 app.UseAuthorization();
 
 app.MapControllers();

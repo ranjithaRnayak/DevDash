@@ -22,25 +22,53 @@ public class RateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        // Check authentication type - skip rate limiting for PAT auth, apply for Entra ID
+        var authType = context.User.FindFirst("auth_type")?.Value
+                       ?? context.Request.Headers["X-Auth-Type"].FirstOrDefault()
+                       ?? "";
+
+        var isPATAuth = authType.Equals("PAT", StringComparison.OrdinalIgnoreCase)
+                        || context.Request.Headers.ContainsKey("X-PAT-Token")
+                        || !context.User.Identity?.IsAuthenticated == true;
+
+        // Skip rate limiting for PAT authentication (local dev), apply for Entra ID (production)
+        if (isPATAuth)
+        {
+            await _next(context);
+            return;
+        }
+
         var path = context.Request.Path.Value?.ToLower() ?? "";
 
-        // Apply rate limiting to AI endpoints
-        if (path.Contains("/api/aiassistant"))
+        if (path.Contains("/api/aiassistant") || path.Contains("/api/copilot"))
         {
-            var limit = _configuration.GetValue<int>("RateLimiting:AIRequestsPerMinute", 10);
+            var limit = _configuration.GetValue<int>("RateLimiting:AIRequestsPerMinute", 20);
             if (!await CheckRateLimitAsync(context, "ai", limit))
-            {
                 return;
-            }
         }
-        // Apply rate limiting to DevOps endpoints
         else if (path.Contains("/api/devops"))
         {
-            var limit = _configuration.GetValue<int>("RateLimiting:DevOpsRequestsPerMinute", 30);
+            var limit = _configuration.GetValue<int>("RateLimiting:DevOpsRequestsPerMinute", 120);
             if (!await CheckRateLimitAsync(context, "devops", limit))
-            {
                 return;
-            }
+        }
+        else if (path.Contains("/api/performance"))
+        {
+            var limit = _configuration.GetValue<int>("RateLimiting:PerformanceRequestsPerMinute", 60);
+            if (!await CheckRateLimitAsync(context, "performance", limit))
+                return;
+        }
+        else if (path.Contains("/api/sonarqube"))
+        {
+            var limit = _configuration.GetValue<int>("RateLimiting:SonarQubeRequestsPerMinute", 30);
+            if (!await CheckRateLimitAsync(context, "sonarqube", limit))
+                return;
+        }
+        else if (path.Contains("/api/lighthouse"))
+        {
+            var limit = _configuration.GetValue<int>("RateLimiting:LighthouseRequestsPerMinute", 30);
+            if (!await CheckRateLimitAsync(context, "lighthouse", limit))
+                return;
         }
 
         await _next(context);

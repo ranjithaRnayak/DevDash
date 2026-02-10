@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { lighthouseAPI } from '../api/backendClient';
 
 const LighthouseMetrics = ({ selectedBranch, dashboardId }) => {
@@ -8,8 +8,11 @@ const LighthouseMetrics = ({ selectedBranch, dashboardId }) => {
     const [loading, setLoading] = useState(true);
     const [enabled, setEnabled] = useState(false);
     const [currentBranch, setCurrentBranch] = useState(selectedBranch || '');
+    const hasFetched = useRef(false);
 
     useEffect(() => {
+        if (hasFetched.current) return;
+        hasFetched.current = true;
         checkStatus();
     }, []);
 

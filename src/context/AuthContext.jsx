@@ -1,8 +1,11 @@
 // Auth Context - React Context for Authentication State Management
 // Microsoft Entra ID as primary auth, GitHub as optional integration
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import authService from '../services/authService';
 import { getAuthFlags, isGitHubConnectedFlag } from '../config/featureFlags';
+
+// Cache authFlags at module level to prevent re-creation
+const cachedAuthFlags = getAuthFlags();
 
 // Create the Auth Context
 const AuthContext = createContext(null);
@@ -167,15 +170,15 @@ export const AuthProvider = ({ children }) => {
     setError(null);
   }, []);
 
-  // Context value
-  const value = {
+  // Memoize context value to prevent unnecessary re-renders
+  const value = useMemo(() => ({
     // State
     user,
     loading,
     error,
     isAuthenticated: !!user,
     githubConnected,
-    authFlags: getAuthFlags(),
+    authFlags: cachedAuthFlags,
 
     // Actions
     loginWithEntraID,
@@ -187,7 +190,21 @@ export const AuthProvider = ({ children }) => {
     logout,
     refreshToken,
     clearError,
-  };
+  }), [
+    user,
+    loading,
+    error,
+    githubConnected,
+    loginWithEntraID,
+    handleEntraIDCallback,
+    connectGitHubWithPAT,
+    connectGitHubWithOAuth,
+    handleGitHubOAuthCallback,
+    disconnectGitHub,
+    logout,
+    refreshToken,
+    clearError,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

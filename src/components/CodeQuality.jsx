@@ -1,12 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { sonarqubeAPI } from '../api/backendClient';
 
 const CodeQuality = () => {
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [sonarConfig, setSonarConfig] = useState({ baseUrl: '', isConfigured: false });
+    const hasFetched = useRef(false);
 
     useEffect(() => {
+        if (hasFetched.current) return;
+        hasFetched.current = true;
+
         const fetchData = async () => {
             setLoading(true);
             try {

@@ -28,9 +28,10 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      // Clear tokens but don't reload - let AuthContext handle it
       localStorage.removeItem('devdash_auth_token');
       sessionStorage.removeItem('devdash_auth_token');
-      window.location.reload();
+      // Don't reload - causes infinite loop if API returns 401
     }
     return Promise.reject(error);
   }

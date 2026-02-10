@@ -1,44 +1,83 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 /**
  * Custom hook for managing Dev/Test environment toggle
- * Handles visual updates and state management for the environment switch
+ * Uses CSS classes for smooth transitions without flickering
  */
 export function useEnvironmentToggle() {
-    const [isTestMode, setIsTestMode] = useState(false);
+    const [isTestMode, setIsTestMode] = useState(() => {
+        // Initialize from localStorage if available
+        const saved = localStorage.getItem('devdash_env_mode');
+        return saved === 'test';
+    });
+    const initialized = useRef(false);
+    const listenerAttached = useRef(false);
 
     useEffect(() => {
-        const toggle = document.getElementById("envToggle");
+        // Set initial body class immediately
+        if (!initialized.current) {
+            initialized.current = true;
+            document.body.classList.add(isTestMode ? 'env-test' : 'env-dev');
+        }
+    }, []);
+
+    useEffect(() => {
+        // Update body class when mode changes
+        document.body.classList.remove('env-dev', 'env-test');
+        document.body.classList.add(isTestMode ? 'env-test' : 'env-dev');
+
+        // Persist to localStorage
+        localStorage.setItem('devdash_env_mode', isTestMode ? 'test' : 'dev');
+
+        // Update toggle UI elements
         const labelLeft = document.getElementById("envLeftLabel");
         const labelRight = document.getElementById("envRightLabel");
         const slider = document.querySelector(".slider");
+        const toggle = document.getElementById("envToggle");
 
-        if (!toggle || !labelLeft || !labelRight || !slider) return;
+        if (toggle && toggle.checked !== isTestMode) {
+            toggle.checked = isTestMode;
+        }
 
-        const updateLabel = () => {
-            if (toggle.checked) {
+        if (labelLeft && labelRight && slider) {
+            if (isTestMode) {
                 labelLeft.style.color = "#ccc";
                 labelLeft.style.fontSize = "14px";
                 labelRight.style.color = "#3b82f6";
                 labelRight.style.fontSize = "16px";
-                document.body.style.backgroundColor = "#1b324f";
                 slider.style.backgroundColor = "#3b82f6";
             } else {
                 labelLeft.style.color = "#22c55e";
                 labelLeft.style.fontSize = "16px";
                 labelRight.style.color = "#ccc";
                 labelRight.style.fontSize = "14px";
-                document.body.style.backgroundColor = "#17271f";
                 slider.style.backgroundColor = "#22c55e";
             }
-            setIsTestMode(toggle.checked);
+        }
+    }, [isTestMode]);
+
+    useEffect(() => {
+        if (listenerAttached.current) return;
+
+        const toggle = document.getElementById("envToggle");
+        if (!toggle) return;
+
+        listenerAttached.current = true;
+
+        const handleChange = (e) => {
+            setIsTestMode(e.target.checked);
         };
 
-        toggle.addEventListener("change", updateLabel);
-        updateLabel();
+        toggle.addEventListener("change", handleChange);
 
-        return () => toggle.removeEventListener("change", updateLabel);
-    }, []);
+        // Sync toggle with state
+        toggle.checked = isTestMode;
+
+        return () => {
+            toggle.removeEventListener("change", handleChange);
+            listenerAttached.current = false;
+        };
+    }, []);  // Empty dependency - only run once on mount
 
     return isTestMode;
 }

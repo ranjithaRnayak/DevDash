@@ -1,10 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { devOpsAPI } from '../api/backendClient';
 
 const PipelineStatus = () => {
     const [builds, setBuilds] = useState([]);
+    const hasFetched = useRef(false);
 
     useEffect(() => {
+        if (hasFetched.current) return;
+        hasFetched.current = true;
+
         const fetchBuilds = async () => {
             try {
                 const response = await devOpsAPI.getBuilds(20);

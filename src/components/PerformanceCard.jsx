@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { performanceAPI } from '../api/backendClient';
 
 const PerformanceCard = () => {
@@ -9,8 +9,12 @@ const PerformanceCard = () => {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState('drafts');
     const [schedulingMeeting, setSchedulingMeeting] = useState(false);
+    const hasFetched = useRef(false);
 
     useEffect(() => {
+        if (hasFetched.current) return;
+        hasFetched.current = true;
+
         const fetchDashboardData = async () => {
             setLoading(true);
             try {
