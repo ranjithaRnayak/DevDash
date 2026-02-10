@@ -217,15 +217,23 @@ public class AzureDevOpsService : IDevOpsService
             }
 
             var membersResult = await membersResponse.Content.ReadFromJsonAsync<AzDoTeamMembersResponse>();
-            var members = membersResult?.Value?.Select(m => new TeamMember
-            {
-                Id = m.Identity?.Id ?? "",
-                DisplayName = m.Identity?.DisplayName ?? "",
-                Email = m.Identity?.UniqueName,
-                UniqueName = m.Identity?.UniqueName,
-                AvatarUrl = m.Identity?.ImageUrl,
-                Source = "AzureDevOps"
-            }).ToList() ?? new List<TeamMember>();
+
+            // Filter out groups - only include actual users with valid email addresses
+            // Groups have UniqueName like "///Classification/TeamProject/..." or "VSTFS:///..."
+            var members = membersResult?.Value?
+                .Where(m => m.Identity?.UniqueName != null &&
+                           m.Identity.UniqueName.Contains('@') &&
+                           !m.Identity.UniqueName.StartsWith("///") &&
+                           !m.Identity.UniqueName.StartsWith("VSTFS:///"))
+                .Select(m => new TeamMember
+                {
+                    Id = m.Identity?.Id ?? "",
+                    DisplayName = m.Identity?.DisplayName ?? "",
+                    Email = m.Identity?.UniqueName,
+                    UniqueName = m.Identity?.UniqueName,
+                    AvatarUrl = m.Identity?.ImageUrl,
+                    Source = "AzureDevOps"
+                }).ToList() ?? new List<TeamMember>();
 
             await _cacheService.SetAsync(cacheKey, members, TimeSpan.FromMinutes(30));
             return members;
@@ -453,7 +461,18 @@ public class GitHubService : IGitHubService
 
     private void ConfigureHttpClient()
     {
-        _httpClient.BaseAddress = new Uri(_configuration["GitHub:ApiUrl"] ?? "https://api.github.com");
+        var apiUrl = _configuration["GitHub:ApiUrl"] ?? "https://api.github.com";
+        // Ensure base address ends with / for proper URL resolution
+        if (!apiUrl.EndsWith("/"))
+        {
+            apiUrl += "/";
+        }
+        _httpClient.BaseAddress = new Uri(apiUrl);
+
+        // GitHub API requires User-Agent header
+        _httpClient.DefaultRequestHeaders.Add("User-Agent", "DevDash-Application");
+        _httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
+        _httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
 
         var token = _configuration["GitHub:PAT"];
         if (!string.IsNullOrEmpty(token))
@@ -498,7 +517,7 @@ public class GitHubService : IGitHubService
             {
                 try
                 {
-                    var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls?state={state}");
+                    var response = await _httpClient.GetAsync($"repos/{owner}/{repo}/pulls?state={state}");
                     if (!response.IsSuccessStatusCode)
                     {
                         _logger.LogWarning("Failed to fetch PRs from {Owner}/{Repo}: {StatusCode}", owner, repo, response.StatusCode);
@@ -544,7 +563,7 @@ public class GitHubService : IGitHubService
 
             foreach (var repo in repos)
             {
-                var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls/{prNumber}");
+                var response = await _httpClient.GetAsync($"repos/{owner}/{repo}/pulls/{prNumber}");
                 if (response.IsSuccessStatusCode)
                 {
                     var ghPR = await response.Content.ReadFromJsonAsync<GitHubPR>();
@@ -577,7 +596,7 @@ public class GitHubService : IGitHubService
 
             foreach (var repo in repos)
             {
-                var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls/{prNumber}/comments");
+                var response = await _httpClient.GetAsync($"repos/{owner}/{repo}/pulls/{prNumber}/comments");
                 if (response.IsSuccessStatusCode)
                 {
                     var ghComments = await response.Content.ReadFromJsonAsync<List<GitHubComment>>();
@@ -613,7 +632,7 @@ public class GitHubService : IGitHubService
             }
 
             // Try to get organization members (requires org:read scope)
-            var response = await _httpClient.GetAsync($"/orgs/{owner}/members");
+            var response = await _httpClient.GetAsync($"orgs/{owner}/members");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -658,7 +677,7 @@ public class GitHubService : IGitHubService
 
             foreach (var repo in repos.Take(3)) // Limit to first 3 repos to avoid rate limiting
             {
-                var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/collaborators");
+                var response = await _httpClient.GetAsync($"repos/{owner}/{repo}/collaborators");
                 if (response.IsSuccessStatusCode)
                 {
                     var collaborators = await response.Content.ReadFromJsonAsync<List<GitHubUser>>();
