@@ -275,17 +275,22 @@ public class AzureDevOpsService : IDevOpsService
             ? $"{orgUrl}/{projectName}/_git/{repoName}/pullrequest/{pr.PullRequestId}"
             : null;
 
-        // Map reviewers with email information
-        var reviewers = pr.Reviewers?.Select(r => new PRReviewer
-        {
-            Id = r.Id ?? "",
-            DisplayName = r.DisplayName ?? "",
-            Email = r.UniqueName,
-            UniqueName = r.UniqueName,
-            AvatarUrl = r.ImageUrl,
-            Vote = MapReviewVote(r.Vote),
-            IsRequired = r.IsRequired
-        }).ToList() ?? new List<PRReviewer>();
+        // Map reviewers with email information - filter out groups (only include actual users)
+        var reviewers = pr.Reviewers?
+            .Where(r => r.UniqueName != null &&
+                       r.UniqueName.Contains('@') &&
+                       !r.UniqueName.StartsWith("///") &&
+                       !r.UniqueName.StartsWith("VSTFS:///"))
+            .Select(r => new PRReviewer
+            {
+                Id = r.Id ?? "",
+                DisplayName = r.DisplayName ?? "",
+                Email = r.UniqueName,
+                UniqueName = r.UniqueName,
+                AvatarUrl = r.ImageUrl,
+                Vote = MapReviewVote(r.Vote),
+                IsRequired = r.IsRequired
+            }).ToList() ?? new List<PRReviewer>();
 
         return new PullRequest
         {
@@ -455,31 +460,7 @@ public class GitHubService : IGitHubService
         _configuration = configuration;
         _cacheService = cacheService;
         _logger = logger;
-
-        ConfigureHttpClient();
-    }
-
-    private void ConfigureHttpClient()
-    {
-        var apiUrl = _configuration["GitHub:ApiUrl"] ?? "https://api.github.com";
-        // Ensure base address ends with / for proper URL resolution
-        if (!apiUrl.EndsWith("/"))
-        {
-            apiUrl += "/";
-        }
-        _httpClient.BaseAddress = new Uri(apiUrl);
-
-        // GitHub API requires User-Agent header
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "DevDash-Application");
-        _httpClient.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
-        _httpClient.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-
-        var token = _configuration["GitHub:PAT"];
-        if (!string.IsNullOrEmpty(token))
-        {
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-        }
+        // HttpClient is configured in Program.cs via AddHttpClient
     }
 
     public async Task<List<PullRequest>> GetPullRequestsAsync(string state = "open")
