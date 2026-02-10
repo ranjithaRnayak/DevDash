@@ -88,9 +88,13 @@ public class AzureDevOpsService : IDevOpsService
         try
         {
             var project = _configuration["AzureDevOps:Project"];
-            var response = await _httpClient.GetAsync(
-                $"{project}/_apis/build/builds?$top={count}&api-version=7.0");
+            var requestUrl = $"{project}/_apis/build/builds?$top={count}&api-version=7.0";
+            var fullUrl = new Uri(_httpClient.BaseAddress!, requestUrl);
+            _logger.LogInformation("Fetching builds from: {Url}", fullUrl);
 
+            var response = await _httpClient.GetAsync(requestUrl);
+
+            _logger.LogInformation("Build API response status: {StatusCode}", response.StatusCode);
             response.EnsureSuccessStatusCode();
 
             var result = await response.Content.ReadFromJsonAsync<AzDoBuildsResponse>();
@@ -98,6 +102,12 @@ public class AzureDevOpsService : IDevOpsService
 
             await _cacheService.SetAsync(cacheKey, builds, TimeSpan.FromMinutes(2));
             return builds;
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error fetching Azure DevOps builds. BaseAddress: {BaseAddress}",
+                _httpClient.BaseAddress);
+            return new List<PipelineBuild>();
         }
         catch (Exception ex)
         {
