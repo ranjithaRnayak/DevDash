@@ -189,13 +189,24 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                      ?? new[] { "http://localhost:5173" };
+        if (builder.Environment.IsDevelopment())
+        {
+            // Allow any origin in development
+            policy.SetIsOriginAllowed(_ => true)
+                .AllowAnyMethod()
+                .AllowAnyHeader()
+                .AllowCredentials();
+        }
+        else
+        {
+            var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                          ?? new[] { "http://localhost:5173" };
 
-        policy.WithOrigins(origins)
-            .AllowAnyMethod()
-            .AllowAnyHeader()
-            .AllowCredentials();
+            policy.WithOrigins(origins)
+                .AllowAnyMethod()
+                .AllowAnyHeader()
+                .AllowCredentials();
+        }
     });
 });
 
