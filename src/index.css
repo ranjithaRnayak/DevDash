@@ -294,13 +294,23 @@ input:checked + .slider {
 }
 
 .source-label {
-    font-size: 12px;
-    color: #bbb;
-    background-color: #2a2d3e;
+    font-size: 10px;
     padding: 2px 6px;
     border-radius: 4px;
     display: inline-block;
-    margin-top: 4px;
+    font-weight: 500;
+}
+
+.source-label.github {
+    background-color: rgba(35, 134, 54, 0.2);
+    color: #238636;
+    border: 1px solid rgba(35, 134, 54, 0.4);
+}
+
+.source-label.azure {
+    background-color: rgba(0, 120, 212, 0.2);
+    color: #0078d4;
+    border: 1px solid rgba(0, 120, 212, 0.4);
 }
 
 .pipeline-row {
@@ -1078,8 +1088,15 @@ input:checked + .slider {
     font-size: 10px;
     padding: 2px 6px;
     background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.4);
     border-radius: 4px;
     color: #f59e0b;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.draft-label:hover {
+    background: rgba(245, 158, 11, 0.3);
 }
 
 .pr-details {

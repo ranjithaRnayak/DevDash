@@ -18,8 +18,8 @@ const PRAlerts = ({ dashboardId, repos }) => {
                 const response = await devOpsAPI.getPullRequests('open');
                 const prs = response.data || [];
 
+                // Include all PRs (including drafts), sort by created date
                 const activePRs = prs
-                    .filter(pr => pr.status !== 'Draft')
                     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
                 setAllPRs(activePRs);
@@ -37,8 +37,8 @@ const PRAlerts = ({ dashboardId, repos }) => {
 
     // Handle PR row click - open the actual PR URL
     const handlePRClick = (pr, e) => {
-        // Don't open if clicking on overdue label
-        if (e.target.classList.contains('warning-label')) return;
+        // Don't open if clicking on overdue/draft label
+        if (e.target.classList.contains('warning-label') || e.target.classList.contains('draft-label')) return;
 
         const prUrl = getPRUrl(pr);
         if (prUrl) {
@@ -65,8 +65,8 @@ const PRAlerts = ({ dashboardId, repos }) => {
         return pr.url || null;
     };
 
-    // Handle overdue label click - send email reminder
-    const handleOverdueClick = (e, pr, reviewerEmails, subject, body) => {
+    // Handle overdue/draft label click - send email reminder
+    const handleLabelClick = (e, pr, reviewerEmails, subject, body) => {
         e.preventDefault();
         e.stopPropagation();
 
@@ -76,6 +76,23 @@ const PRAlerts = ({ dashboardId, repos }) => {
             // If no reviewers, open a generic email
             window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${body}`;
         }
+    };
+
+    // Get source label style
+    const getSourceStyle = (source) => {
+        if (source === 'GitHub') {
+            return {
+                backgroundColor: 'rgba(35, 134, 54, 0.2)',
+                color: '#238636',
+                border: '1px solid rgba(35, 134, 54, 0.4)'
+            };
+        }
+        // Azure DevOps
+        return {
+            backgroundColor: 'rgba(0, 120, 212, 0.2)',
+            color: '#0078d4',
+            border: '1px solid rgba(0, 120, 212, 0.4)'
+        };
     };
 
     if (loading) {
@@ -112,7 +129,7 @@ const PRAlerts = ({ dashboardId, repos }) => {
                         const created = new Date(pr.createdAt);
                         const hoursOpen = (Date.now() - created.getTime()) / (1000 * 60 * 60);
                         const isOverdue = hoursOpen > 48;
-                        const isDraft = pr.status === 'Draft';
+                        const isDraft = pr.isDraft === true || pr.status === 'Draft';
 
                         const reviewerEmails = pr.reviewers
                             ?.map(r => r.uniqueName || r.email || '')
@@ -129,7 +146,10 @@ const PRAlerts = ({ dashboardId, repos }) => {
                                 key={`${pr.source}-${pr.id}-${index}`}
                                 className={`pr-row ${isOverdue ? 'overdue' : ''} ${isDraft ? 'draft' : ''}`}
                                 onClick={(e) => handlePRClick(pr, e)}
-                                style={{ cursor: 'pointer' }}
+                                style={{
+                                    cursor: 'pointer',
+                                    borderColor: isDraft ? 'rgba(245, 158, 11, 0.5)' : undefined
+                                }}
                             >
                                 <div className="pr-header">
                                     <strong className="pr-title-link">
@@ -137,16 +157,35 @@ const PRAlerts = ({ dashboardId, repos }) => {
                                     </strong>
 
                                     <div className="pr-labels-container">
-                                        <span className="source-label">
+                                        <span
+                                            className="source-label"
+                                            style={getSourceStyle(pr.source)}
+                                        >
                                             {pr.source === 'AzureDevOps' ? 'Azure' : pr.source}
                                         </span>
                                         {isDraft && (
-                                            <span className="draft-label">Draft</span>
+                                            <span
+                                                className="draft-label"
+                                                onClick={(e) => handleLabelClick(e, pr, reviewerEmails, subject, body)}
+                                                title="Click to send reminder email"
+                                                style={{
+                                                    cursor: 'pointer',
+                                                    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                                                    color: '#f59e0b',
+                                                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                                                    padding: '2px 6px',
+                                                    borderRadius: '4px',
+                                                    fontSize: '10px',
+                                                    fontWeight: '500'
+                                                }}
+                                            >
+                                                Draft
+                                            </span>
                                         )}
                                         {isOverdue && (
                                             <span
                                                 className="warning-label"
-                                                onClick={(e) => handleOverdueClick(e, pr, reviewerEmails, subject, body)}
+                                                onClick={(e) => handleLabelClick(e, pr, reviewerEmails, subject, body)}
                                                 title="Click to send reminder email"
                                                 style={{ cursor: 'pointer' }}
                                             >
