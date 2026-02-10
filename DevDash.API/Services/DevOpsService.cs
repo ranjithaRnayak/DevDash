@@ -399,16 +399,51 @@ public class GitHubService : IGitHubService
         try
         {
             var owner = _configuration["GitHub:Owner"];
-            var repo = _configuration["GitHub:Repo"];
 
-            var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls?state={state}");
-            response.EnsureSuccessStatusCode();
+            // Support multiple repos from configuration (comma-separated)
+            // Check for GitHub:Repo first, then fall back to GitHub:Dev:Repos or GitHub:Test:Repos
+            var repoConfig = _configuration["GitHub:Repo"]
+                ?? _configuration["GitHub:Dev:Repos"]
+                ?? _configuration["GitHub:Test:Repos"]
+                ?? "";
 
-            var ghPRs = await response.Content.ReadFromJsonAsync<List<GitHubPR>>();
-            var prs = ghPRs?.Select(MapToPullRequest).ToList() ?? new List<PullRequest>();
+            var repos = repoConfig.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-            await _cacheService.SetAsync(cacheKey, prs, TimeSpan.FromMinutes(2));
-            return prs;
+            if (string.IsNullOrEmpty(owner) || repos.Length == 0)
+            {
+                _logger.LogWarning("GitHub Owner or Repos not configured. Owner: {Owner}, Repos: {Repos}", owner, repoConfig);
+                return new List<PullRequest>();
+            }
+
+            var allPRs = new List<PullRequest>();
+
+            // Fetch PRs from all configured repos in parallel
+            var tasks = repos.Select(async repo =>
+            {
+                try
+                {
+                    var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls?state={state}");
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("Failed to fetch PRs from {Owner}/{Repo}: {StatusCode}", owner, repo, response.StatusCode);
+                        return new List<PullRequest>();
+                    }
+
+                    var ghPRs = await response.Content.ReadFromJsonAsync<List<GitHubPR>>();
+                    return ghPRs?.Select(pr => MapToPullRequest(pr, owner, repo)).ToList() ?? new List<PullRequest>();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to fetch PRs from {Owner}/{Repo}", owner, repo);
+                    return new List<PullRequest>();
+                }
+            });
+
+            var results = await Task.WhenAll(tasks);
+            allPRs = results.SelectMany(prs => prs).ToList();
+
+            await _cacheService.SetAsync(cacheKey, allPRs, TimeSpan.FromMinutes(2));
+            return allPRs;
         }
         catch (Exception ex)
         {
@@ -422,16 +457,26 @@ public class GitHubService : IGitHubService
         try
         {
             var owner = _configuration["GitHub:Owner"];
-            var repo = _configuration["GitHub:Repo"];
 
-            var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls/{prNumber}");
-            if (!response.IsSuccessStatusCode)
+            // Support multiple repos - search through all to find the PR
+            var repoConfig = _configuration["GitHub:Repo"]
+                ?? _configuration["GitHub:Dev:Repos"]
+                ?? _configuration["GitHub:Test:Repos"]
+                ?? "";
+
+            var repos = repoConfig.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            foreach (var repo in repos)
             {
-                return null;
+                var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls/{prNumber}");
+                if (response.IsSuccessStatusCode)
+                {
+                    var ghPR = await response.Content.ReadFromJsonAsync<GitHubPR>();
+                    return ghPR != null ? MapToPullRequest(ghPR, owner, repo) : null;
+                }
             }
 
-            var ghPR = await response.Content.ReadFromJsonAsync<GitHubPR>();
-            return ghPR != null ? MapToPullRequest(ghPR) : null;
+            return null;
         }
         catch (Exception ex)
         {
@@ -445,13 +490,26 @@ public class GitHubService : IGitHubService
         try
         {
             var owner = _configuration["GitHub:Owner"];
-            var repo = _configuration["GitHub:Repo"];
 
-            var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls/{prNumber}/comments");
-            response.EnsureSuccessStatusCode();
+            // Support multiple repos - search through all to find the PR
+            var repoConfig = _configuration["GitHub:Repo"]
+                ?? _configuration["GitHub:Dev:Repos"]
+                ?? _configuration["GitHub:Test:Repos"]
+                ?? "";
 
-            var ghComments = await response.Content.ReadFromJsonAsync<List<GitHubComment>>();
-            return ghComments?.Select(MapToComment).ToList() ?? new List<PRComment>();
+            var repos = repoConfig.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            foreach (var repo in repos)
+            {
+                var response = await _httpClient.GetAsync($"/repos/{owner}/{repo}/pulls/{prNumber}/comments");
+                if (response.IsSuccessStatusCode)
+                {
+                    var ghComments = await response.Content.ReadFromJsonAsync<List<GitHubComment>>();
+                    return ghComments?.Select(MapToComment).ToList() ?? new List<PRComment>();
+                }
+            }
+
+            return new List<PRComment>();
         }
         catch (Exception ex)
         {
@@ -460,10 +518,10 @@ public class GitHubService : IGitHubService
         }
     }
 
-    private PullRequest MapToPullRequest(GitHubPR pr)
+    private PullRequest MapToPullRequest(GitHubPR pr, string? owner = null, string? repo = null)
     {
-        var owner = _configuration["GitHub:Owner"];
-        var repo = _configuration["GitHub:Repo"];
+        owner ??= _configuration["GitHub:Owner"];
+        repo ??= _configuration["GitHub:Repo"];
 
         // GitHub users often have noreply email in format: userId+username@users.noreply.github.com
         // We use the email if available, otherwise construct a GitHub noreply email from login
