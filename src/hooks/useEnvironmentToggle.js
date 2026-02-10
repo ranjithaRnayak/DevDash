@@ -1,23 +1,46 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 /**
  * Custom hook for managing Dev/Test environment toggle
  * Uses CSS classes for smooth transitions without flickering
  */
 export function useEnvironmentToggle() {
-    const [isTestMode, setIsTestMode] = useState(false);
+    const [isTestMode, setIsTestMode] = useState(() => {
+        // Initialize from localStorage if available
+        const saved = localStorage.getItem('devdash_env_mode');
+        return saved === 'test';
+    });
     const initialized = useRef(false);
+    const listenerAttached = useRef(false);
 
-    const updateEnvironment = useCallback((isTest) => {
+    useEffect(() => {
+        // Set initial body class immediately
+        if (!initialized.current) {
+            initialized.current = true;
+            document.body.classList.add(isTestMode ? 'env-test' : 'env-dev');
+        }
+    }, []);
+
+    useEffect(() => {
+        // Update body class when mode changes
         document.body.classList.remove('env-dev', 'env-test');
-        document.body.classList.add(isTest ? 'env-test' : 'env-dev');
+        document.body.classList.add(isTestMode ? 'env-test' : 'env-dev');
 
+        // Persist to localStorage
+        localStorage.setItem('devdash_env_mode', isTestMode ? 'test' : 'dev');
+
+        // Update toggle UI elements
         const labelLeft = document.getElementById("envLeftLabel");
         const labelRight = document.getElementById("envRightLabel");
         const slider = document.querySelector(".slider");
+        const toggle = document.getElementById("envToggle");
+
+        if (toggle && toggle.checked !== isTestMode) {
+            toggle.checked = isTestMode;
+        }
 
         if (labelLeft && labelRight && slider) {
-            if (isTest) {
+            if (isTestMode) {
                 labelLeft.style.color = "#ccc";
                 labelLeft.style.fontSize = "14px";
                 labelRight.style.color = "#3b82f6";
@@ -31,33 +54,30 @@ export function useEnvironmentToggle() {
                 slider.style.backgroundColor = "#22c55e";
             }
         }
-
-        setIsTestMode(isTest);
-    }, []);
+    }, [isTestMode]);
 
     useEffect(() => {
-        if (initialized.current) return;
+        if (listenerAttached.current) return;
 
         const toggle = document.getElementById("envToggle");
         if (!toggle) return;
 
-        initialized.current = true;
+        listenerAttached.current = true;
 
-        const handleChange = () => {
-            updateEnvironment(toggle.checked);
+        const handleChange = (e) => {
+            setIsTestMode(e.target.checked);
         };
 
         toggle.addEventListener("change", handleChange);
 
-        // Use requestAnimationFrame for initial render to prevent flickering
-        requestAnimationFrame(() => {
-            updateEnvironment(toggle.checked);
-        });
+        // Sync toggle with state
+        toggle.checked = isTestMode;
 
         return () => {
             toggle.removeEventListener("change", handleChange);
+            listenerAttached.current = false;
         };
-    }, [updateEnvironment]);
+    });
 
     return isTestMode;
 }

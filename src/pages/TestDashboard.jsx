@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import PipelineStatus from '../components/PipelineStatus';
 import PRAlerts from '../components/PRAlerts';
 import CodeQuality from '../components/CodeQuality';
@@ -7,7 +7,7 @@ import { DASHBOARD_CONFIGS } from '../config/dashboards';
 
 const dashboardConfig = DASHBOARD_CONFIGS.test;
 
-export default function TestDashboard() {
+const TestDashboard = memo(function TestDashboard() {
     return (
         <div className="container">
             <div className="dashboard-header">
@@ -40,4 +40,6 @@ export default function TestDashboard() {
             </div>
         </div>
     );
-}
+});
+
+export default TestDashboard;
