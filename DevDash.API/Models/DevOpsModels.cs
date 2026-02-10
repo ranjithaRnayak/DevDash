@@ -68,19 +68,35 @@ public class PullRequest
     public string SourceBranch { get; set; } = string.Empty;
     public string TargetBranch { get; set; } = string.Empty;
     public string Author { get; set; } = string.Empty;
+    public string? AuthorEmail { get; set; }
     public string? AuthorAvatarUrl { get; set; }
+    public PRAuthor? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public DateTime? MergedAt { get; set; }
     public DateTime? ClosedAt { get; set; }
     public string? Url { get; set; }
+    public string? WebUrl { get; set; }
+    public string? Repository { get; set; }
     public List<PRReviewer> Reviewers { get; set; } = new();
     public List<PRComment> Comments { get; set; } = new();
     public PRSource Source { get; set; }
+    public bool IsDraft { get; set; }
     public bool HasConflicts { get; set; }
     public int AdditionsCount { get; set; }
     public int DeletionsCount { get; set; }
     public int ChangedFilesCount { get; set; }
+}
+
+/// <summary>
+/// PR author information
+/// </summary>
+public class PRAuthor
+{
+    public string? DisplayName { get; set; }
+    public string? Email { get; set; }
+    public string? UniqueName { get; set; }
+    public string? AvatarUrl { get; set; }
 }
 
 public enum PRStatus
@@ -104,6 +120,8 @@ public class PRReviewer
 {
     public string Id { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? UniqueName { get; set; }
     public string? AvatarUrl { get; set; }
     public ReviewVote Vote { get; set; }
     public bool IsRequired { get; set; }
@@ -157,4 +175,37 @@ public class DashboardSummary
     public List<PipelineBuild> RecentBuilds { get; set; } = new();
     public List<PullRequest> RecentPRs { get; set; } = new();
     public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// PR Alerts configuration from appsettings
+/// </summary>
+public class PRAlertsConfig
+{
+    public int OverdueHours { get; set; } = 48;
+    public int StalePRDays { get; set; } = 7;
+    public int RequiredApprovers { get; set; } = 2;
+    public OverdueEmailConfig? OverdueEmail { get; set; }
+    public List<string> DefaultReviewers { get; set; } = new();
+    public List<TeamMember> TeamMembers { get; set; } = new();
+}
+
+public class OverdueEmailConfig
+{
+    public List<string> To { get; set; } = new();
+    public List<string> Cc { get; set; } = new();
+    public string Subject { get; set; } = "Overdue PR Alert - Action Required";
+}
+
+/// <summary>
+/// Team member information
+/// </summary>
+public class TeamMember
+{
+    public string Id { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? UniqueName { get; set; }
+    public string? AvatarUrl { get; set; }
+    public string Source { get; set; } = string.Empty; // "AzureDevOps" or "GitHub"
 }

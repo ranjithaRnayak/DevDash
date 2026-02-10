@@ -127,10 +127,23 @@ builder.Services.AddHttpClient<IDevOpsService, AzureDevOpsService>(client =>
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
 
-builder.Services.AddHttpClient<IGitHubService, GitHubService>(client =>
+builder.Services.AddHttpClient<IGitHubService, GitHubService>((sp, client) =>
 {
+    var config = sp.GetRequiredService<IConfiguration>();
+    var apiUrl = config["GitHub:ApiUrl"] ?? "https://api.github.com";
+    if (!apiUrl.EndsWith("/")) apiUrl += "/";
+
+    client.BaseAddress = new Uri(apiUrl);
     client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
     client.DefaultRequestHeaders.Add("User-Agent", "DevDash-API");
+    client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+
+    var token = config["GitHub:PAT"];
+    if (!string.IsNullOrEmpty(token))
+    {
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    }
 });
 
 // ============================================
@@ -142,10 +155,23 @@ builder.Services.AddHttpClient("AzureDevOps", client =>
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
 
-builder.Services.AddHttpClient("GitHub", client =>
+builder.Services.AddHttpClient("GitHub", (sp, client) =>
 {
+    var config = sp.GetRequiredService<IConfiguration>();
+    var apiUrl = config["GitHub:ApiUrl"] ?? "https://api.github.com";
+    if (!apiUrl.EndsWith("/")) apiUrl += "/";
+
+    client.BaseAddress = new Uri(apiUrl);
     client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
     client.DefaultRequestHeaders.Add("User-Agent", "DevDash-API");
+    client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+
+    var token = config["GitHub:PAT"];
+    if (!string.IsNullOrEmpty(token))
+    {
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    }
 });
 
 builder.Services.AddHttpClient("MicrosoftGraph", client =>
@@ -219,7 +245,11 @@ builder.Services.AddCors(options =>
 // Controllers & Swagger
 // ============================================
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {

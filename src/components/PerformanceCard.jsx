@@ -11,6 +11,8 @@ const PerformanceCard = () => {
     const [schedulingMeeting, setSchedulingMeeting] = useState(false);
     const hasFetched = useRef(false);
 
+    const [error, setError] = useState(null);
+
     useEffect(() => {
         if (hasFetched.current) return;
         hasFetched.current = true;
@@ -39,6 +41,7 @@ const PerformanceCard = () => {
                     if (pointsRes.status === 'fulfilled') setStoryPoints(pointsRes.value.data || { notStarted: 0, total: 0, items: [] });
                 } catch (fallbackErr) {
                     console.error('Fallback fetch failed:', fallbackErr);
+                    setError('Failed to load performance data');
                 }
             } finally {
                 setLoading(false);
@@ -118,6 +121,17 @@ const PerformanceCard = () => {
                 <div className="loading-state">
                     <div className="spinner"></div>
                     <p>Loading your data...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="card performance-card">
+                <h2>My Performance</h2>
+                <div className="error-state" style={{ color: '#f87171', padding: '1rem' }}>
+                    <p>Error: {error}</p>
                 </div>
             </div>
         );

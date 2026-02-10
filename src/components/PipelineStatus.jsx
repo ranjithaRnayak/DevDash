@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { devOpsAPI } from '../api/backendClient';
 
-const PipelineStatus = () => {
+const PipelineStatus = ({ dashboardId, pipelines }) => {
     const [builds, setBuilds] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const hasFetched = useRef(false);
 
     useEffect(() => {
@@ -10,12 +12,17 @@ const PipelineStatus = () => {
         hasFetched.current = true;
 
         const fetchBuilds = async () => {
+            setLoading(true);
+            setError(null);
             try {
                 const response = await devOpsAPI.getBuilds(20);
                 setBuilds(response.data || []);
-            } catch (error) {
-                console.error('Failed to fetch pipeline builds:', error);
+            } catch (err) {
+                console.error('Failed to fetch pipeline builds:', err);
+                setError(err.message || 'Failed to fetch builds');
                 setBuilds([]);
+            } finally {
+                setLoading(false);
             }
         };
 
@@ -61,10 +68,33 @@ const PipelineStatus = () => {
         }
     };
 
+    if (loading) {
+        return (
+            <div className="pipeline-alerts-card">
+                <h2>Pipeline Builds</h2>
+                <div className="loading-state">
+                    <div className="spinner"></div>
+                    <p>Loading builds...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="pipeline-alerts-card">
+                <h2>Pipeline Builds</h2>
+                <div className="error-state" style={{ color: '#f87171', padding: '1rem' }}>
+                    <p>Error: {error}</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="pipeline-alerts-card">
             <h2>Pipeline Builds</h2>
-            {builds.length === 0 && <p>Loading builds...</p>}
+            {builds.length === 0 && <p>No builds found.</p>}
 
             <div className="table-header">
                 <div>Build Name</div>

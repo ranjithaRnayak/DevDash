@@ -26,16 +26,9 @@ public class PATAuthenticationHandler : AuthenticationHandler<PATAuthenticationO
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        // Check if PAT mode is enabled
-        var usePATToken = _configuration.GetValue<bool>("FeatureFlags:UsePATToken", false);
+        // If this handler is registered, PAT mode is enabled - always authenticate
+        // The check for UsePATToken is done at startup in Program.cs
 
-        if (!usePATToken)
-        {
-            // PAT mode not enabled, skip this handler
-            return Task.FromResult(AuthenticateResult.NoResult());
-        }
-
-        // PAT mode is enabled - create a claims principal for the request
         var claims = new List<Claim>
         {
             new Claim(ClaimTypes.NameIdentifier, "pat-user"),
