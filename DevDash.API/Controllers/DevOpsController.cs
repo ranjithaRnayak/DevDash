@@ -271,7 +271,9 @@ public class DevOpsController : ControllerBase
                     To = _configuration.GetSection("PRAlerts:OverdueEmail:To").Get<List<string>>() ?? new List<string>(),
                     Cc = _configuration.GetSection("PRAlerts:OverdueEmail:Cc").Get<List<string>>() ?? new List<string>(),
                     Subject = _configuration.GetValue<string>("PRAlerts:OverdueEmail:Subject") ?? "Overdue PR Alert - Action Required"
-                }
+                },
+                // Include default reviewers from CodeReview config
+                DefaultReviewers = _configuration.GetSection("CodeReview:DefaultReviewers").Get<List<string>>() ?? new List<string>()
             };
 
             // Fetch team members from Azure DevOps and GitHub

@@ -80,34 +80,39 @@ const PRAlerts = ({ dashboardId, repos }) => {
         return pr.webUrl || null;
     };
 
-    // Build email recipients list combining PR reviewers, team members, and config
+    // Build email recipients list combining PR reviewers, default reviewers, team members, and config
     const buildEmailRecipients = (pr) => {
         const configuredTo = prAlertsConfig?.overdueEmail?.to || [];
         const configuredCc = prAlertsConfig?.overdueEmail?.cc || [];
+        const defaultReviewers = prAlertsConfig?.defaultReviewers || [];
         const teamMembers = prAlertsConfig?.teamMembers || [];
 
-        // Get reviewer emails from the PR
+        // Get reviewer emails from the PR (filter out empty/invalid)
         const reviewerEmails = pr.reviewers
             ?.map(r => r.email || r.uniqueName || '')
-            .filter(Boolean) || [];
+            .filter(email => email && email.includes('@')) || [];
 
         // Get author email
         const authorEmail = pr.authorEmail || pr.createdBy?.email || pr.createdBy?.uniqueName || '';
 
-        // Get team member emails
+        // Get team member emails (filter out empty/invalid)
         const teamEmails = teamMembers
             .map(m => m.email || m.uniqueName || '')
-            .filter(Boolean);
+            .filter(email => email && email.includes('@'));
 
-        // Build TO list: configured To + reviewers (if any)
-        const toEmails = [...new Set([...configuredTo, ...reviewerEmails])].filter(Boolean);
+        // Build TO list: configured To + default reviewers + PR reviewers
+        const toEmails = [...new Set([
+            ...configuredTo,
+            ...defaultReviewers,
+            ...reviewerEmails
+        ])].filter(email => email && email.includes('@'));
 
         // Build CC list: configured Cc + team members + author
         const ccEmails = [...new Set([
             ...configuredCc,
             ...teamEmails,
             authorEmail
-        ])].filter(Boolean);
+        ])].filter(email => email && email.includes('@'));
 
         // Remove duplicates between TO and CC (keep in TO only)
         const finalCcEmails = ccEmails.filter(email => !toEmails.includes(email));

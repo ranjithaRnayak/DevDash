@@ -186,6 +186,7 @@ public class PRAlertsConfig
     public int StalePRDays { get; set; } = 7;
     public int RequiredApprovers { get; set; } = 2;
     public OverdueEmailConfig? OverdueEmail { get; set; }
+    public List<string> DefaultReviewers { get; set; } = new();
     public List<TeamMember> TeamMembers { get; set; } = new();
 }
 

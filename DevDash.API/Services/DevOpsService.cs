@@ -219,12 +219,9 @@ public class AzureDevOpsService : IDevOpsService
             var membersResult = await membersResponse.Content.ReadFromJsonAsync<AzDoTeamMembersResponse>();
 
             // Filter out groups - only include actual users with valid email addresses
-            // Groups have UniqueName like "///Classification/TeamProject/..." or "VSTFS:///..."
+            // Groups have patterns like: "///Classification/TeamProject/...", "VSTFS:///...", "[VSTFS:...]"
             var members = membersResult?.Value?
-                .Where(m => m.Identity?.UniqueName != null &&
-                           m.Identity.UniqueName.Contains('@') &&
-                           !m.Identity.UniqueName.StartsWith("///") &&
-                           !m.Identity.UniqueName.StartsWith("VSTFS:///"))
+                .Where(m => IsValidUserEmail(m.Identity?.UniqueName))
                 .Select(m => new TeamMember
                 {
                     Id = m.Identity?.Id ?? "",
@@ -277,10 +274,7 @@ public class AzureDevOpsService : IDevOpsService
 
         // Map reviewers with email information - filter out groups (only include actual users)
         var reviewers = pr.Reviewers?
-            .Where(r => r.UniqueName != null &&
-                       r.UniqueName.Contains('@') &&
-                       !r.UniqueName.StartsWith("///") &&
-                       !r.UniqueName.StartsWith("VSTFS:///"))
+            .Where(r => IsValidUserEmail(r.UniqueName))
             .Select(r => new PRReviewer
             {
                 Id = r.Id ?? "",
@@ -329,6 +323,33 @@ public class AzureDevOpsService : IDevOpsService
         -10 => ReviewVote.Rejected,
         _ => ReviewVote.NoVote
     };
+
+    /// <summary>
+    /// Checks if a UniqueName is a valid user email address (not a group identifier)
+    /// Azure DevOps groups have patterns like: "///Classification/TeamProject/...", "VSTFS:///...", "[VSTFS:...]"
+    /// </summary>
+    private static bool IsValidUserEmail(string? uniqueName)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueName))
+            return false;
+
+        var trimmed = uniqueName.Trim();
+
+        // Must contain @ to be a valid email
+        if (!trimmed.Contains('@'))
+            return false;
+
+        // Filter out Azure DevOps group identifiers
+        if (trimmed.Contains("///Classification") ||
+            trimmed.Contains("TeamProject") ||
+            trimmed.Contains("VSTFS:") ||
+            trimmed.Contains("[VSTFS:") ||
+            trimmed.StartsWith("///") ||
+            trimmed.StartsWith("["))
+            return false;
+
+        return true;
+    }
 
     private static BuildStatus MapBuildStatus(string? status) => status?.ToLower() switch
     {
@@ -627,7 +648,7 @@ public class GitHubService : IGitHubService
             {
                 Id = m.Id?.ToString() ?? "",
                 DisplayName = m.Login ?? "",
-                Email = m.Email ?? (m.Login != null ? $"{m.Login}@users.noreply.github.com" : null),
+                Email = m.Email, // Only use actual email, don't construct fake noreply
                 UniqueName = m.Login,
                 AvatarUrl = m.AvatarUrl,
                 Source = "GitHub"
@@ -672,7 +693,7 @@ public class GitHubService : IGitHubService
                                 {
                                     Id = c.Id?.ToString() ?? "",
                                     DisplayName = c.Login,
-                                    Email = c.Email ?? $"{c.Login}@users.noreply.github.com",
+                                    Email = c.Email, // Only use actual email
                                     UniqueName = c.Login,
                                     AvatarUrl = c.AvatarUrl,
                                     Source = "GitHub"
@@ -697,16 +718,15 @@ public class GitHubService : IGitHubService
         owner ??= _configuration["GitHub:Owner"];
         repo ??= _configuration["GitHub:Repo"];
 
-        // GitHub users often have noreply email in format: userId+username@users.noreply.github.com
-        // We use the email if available, otherwise construct a GitHub noreply email from login
-        var authorEmail = pr.User?.Email ?? (pr.User?.Login != null ? $"{pr.User.Login}@users.noreply.github.com" : null);
+        // Only use actual email if available, don't construct fake noreply emails
+        var authorEmail = pr.User?.Email;
 
         // Map requested reviewers
         var reviewers = pr.RequestedReviewers?.Select(r => new PRReviewer
         {
             Id = r.Id?.ToString() ?? "",
             DisplayName = r.Login ?? "",
-            Email = r.Email ?? (r.Login != null ? $"{r.Login}@users.noreply.github.com" : null),
+            Email = r.Email, // Only use actual email
             UniqueName = r.Login,
             AvatarUrl = r.AvatarUrl,
             Vote = ReviewVote.NoVote,
