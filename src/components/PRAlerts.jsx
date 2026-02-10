@@ -131,16 +131,16 @@ const PRAlerts = ({ dashboardId, repos }) => {
                     allPRs.map((pr, index) => {
                         const created = new Date(pr.createdAt);
                         const hoursOpen = (Date.now() - created.getTime()) / (1000 * 60 * 60);
-                        const isOverdue = hoursOpen > 48 && !pr.isDraft;
+                        const isOverdue = hoursOpen > 48; // Show overdue for all PRs including drafts
                         const isDraft = pr.isDraft === true || pr.status === 'Draft';
                         const isGitHub = pr.source === 'GitHub';
 
                         const reviewerEmails = pr.reviewers
-                            ?.map(r => r.uniqueName || r.email || '')
+                            ?.map(r => r.email || r.uniqueName || '')
                             .filter(Boolean)
                             .join(',') || '';
 
-                        const authorEmail = pr.authorEmail || pr.createdBy?.uniqueName || pr.createdBy?.email || '';
+                        const authorEmail = pr.authorEmail || pr.createdBy?.email || pr.createdBy?.uniqueName || '';
 
                         const subject = isDraft
                             ? `Reminder: Draft PR Ready for Review - ${pr.title}`

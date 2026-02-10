@@ -204,6 +204,18 @@ public class AzureDevOpsService : IDevOpsService
             ? $"{orgUrl}/{projectName}/_git/{repoName}/pullrequest/{pr.PullRequestId}"
             : null;
 
+        // Map reviewers with email information
+        var reviewers = pr.Reviewers?.Select(r => new PRReviewer
+        {
+            Id = r.Id ?? "",
+            DisplayName = r.DisplayName ?? "",
+            Email = r.UniqueName,
+            UniqueName = r.UniqueName,
+            AvatarUrl = r.ImageUrl,
+            Vote = MapReviewVote(r.Vote),
+            IsRequired = r.IsRequired
+        }).ToList() ?? new List<PRReviewer>();
+
         return new PullRequest
         {
             Id = pr.PullRequestId.ToString(),
@@ -214,14 +226,33 @@ public class AzureDevOpsService : IDevOpsService
             SourceBranch = pr.SourceRefName?.Replace("refs/heads/", "") ?? "",
             TargetBranch = pr.TargetRefName?.Replace("refs/heads/", "") ?? "",
             Author = pr.CreatedBy?.DisplayName ?? "Unknown",
+            AuthorEmail = pr.CreatedBy?.UniqueName,
+            AuthorAvatarUrl = pr.CreatedBy?.ImageUrl,
+            CreatedBy = new PRAuthor
+            {
+                DisplayName = pr.CreatedBy?.DisplayName,
+                Email = pr.CreatedBy?.UniqueName,
+                UniqueName = pr.CreatedBy?.UniqueName,
+                AvatarUrl = pr.CreatedBy?.ImageUrl
+            },
             CreatedAt = pr.CreationDate,
             Source = PRSource.AzureDevOps,
             IsDraft = pr.IsDraft,
             Url = webUrl ?? pr.Url,
             WebUrl = webUrl,
-            Repository = repoName
+            Repository = repoName,
+            Reviewers = reviewers
         };
     }
+
+    private static ReviewVote MapReviewVote(int vote) => vote switch
+    {
+        10 => ReviewVote.Approved,
+        5 => ReviewVote.ApprovedWithSuggestions,
+        -5 => ReviewVote.WaitingForAuthor,
+        -10 => ReviewVote.Rejected,
+        _ => ReviewVote.NoVote
+    };
 
     private static BuildStatus MapBuildStatus(string? status) => status?.ToLower() switch
     {
@@ -270,9 +301,25 @@ public class AzureDevOpsService : IDevOpsService
     }
 
     private class AzDoDefinition { public int Id { get; set; } public string? Name { get; set; } }
-    private class AzDoIdentity { public string? DisplayName { get; set; } }
+    private class AzDoIdentity
+    {
+        public string? DisplayName { get; set; }
+        public string? UniqueName { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? Id { get; set; }
+    }
     private class AzDoLinks { public AzDoLink? Web { get; set; } }
     private class AzDoLink { public string? Href { get; set; } }
+
+    private class AzDoReviewer
+    {
+        public string? Id { get; set; }
+        public string? DisplayName { get; set; }
+        public string? UniqueName { get; set; }
+        public string? ImageUrl { get; set; }
+        public int Vote { get; set; }
+        public bool IsRequired { get; set; }
+    }
 
     private class AzDoPR
     {
@@ -287,6 +334,7 @@ public class AzureDevOpsService : IDevOpsService
         public AzDoIdentity? CreatedBy { get; set; }
         public string? Url { get; set; }
         public AzDoPRRepository? Repository { get; set; }
+        public List<AzDoReviewer>? Reviewers { get; set; }
     }
 
     private class AzDoPRRepository
@@ -417,6 +465,22 @@ public class GitHubService : IGitHubService
         var owner = _configuration["GitHub:Owner"];
         var repo = _configuration["GitHub:Repo"];
 
+        // GitHub users often have noreply email in format: userId+username@users.noreply.github.com
+        // We use the email if available, otherwise construct a GitHub noreply email from login
+        var authorEmail = pr.User?.Email ?? (pr.User?.Login != null ? $"{pr.User.Login}@users.noreply.github.com" : null);
+
+        // Map requested reviewers
+        var reviewers = pr.RequestedReviewers?.Select(r => new PRReviewer
+        {
+            Id = r.Id?.ToString() ?? "",
+            DisplayName = r.Login ?? "",
+            Email = r.Email ?? (r.Login != null ? $"{r.Login}@users.noreply.github.com" : null),
+            UniqueName = r.Login,
+            AvatarUrl = r.AvatarUrl,
+            Vote = ReviewVote.NoVote,
+            IsRequired = false
+        }).ToList() ?? new List<PRReviewer>();
+
         return new PullRequest
         {
             Id = pr.Id.ToString(),
@@ -427,7 +491,15 @@ public class GitHubService : IGitHubService
             SourceBranch = pr.Head?.Ref ?? "",
             TargetBranch = pr.Base?.Ref ?? "",
             Author = pr.User?.Login ?? "Unknown",
+            AuthorEmail = authorEmail,
             AuthorAvatarUrl = pr.User?.AvatarUrl,
+            CreatedBy = new PRAuthor
+            {
+                DisplayName = pr.User?.Login,
+                Email = authorEmail,
+                UniqueName = pr.User?.Login,
+                AvatarUrl = pr.User?.AvatarUrl
+            },
             CreatedAt = pr.CreatedAt,
             UpdatedAt = pr.UpdatedAt,
             MergedAt = pr.MergedAt,
@@ -439,7 +511,8 @@ public class GitHubService : IGitHubService
             IsDraft = pr.Draft,
             AdditionsCount = pr.Additions,
             DeletionsCount = pr.Deletions,
-            ChangedFilesCount = pr.ChangedFiles
+            ChangedFilesCount = pr.ChangedFiles,
+            Reviewers = reviewers
         };
     }
 
@@ -489,10 +562,17 @@ public class GitHubService : IGitHubService
         public int Additions { get; set; }
         public int Deletions { get; set; }
         public int ChangedFiles { get; set; }
+        public List<GitHubUser>? RequestedReviewers { get; set; }
     }
 
     private class GitHubRef { public string? Ref { get; set; } }
-    private class GitHubUser { public string? Login { get; set; } public string? AvatarUrl { get; set; } }
+    private class GitHubUser
+    {
+        public string? Login { get; set; }
+        public string? AvatarUrl { get; set; }
+        public string? Email { get; set; }
+        public long? Id { get; set; }
+    }
 
     private class GitHubComment
     {

@@ -68,7 +68,9 @@ public class PullRequest
     public string SourceBranch { get; set; } = string.Empty;
     public string TargetBranch { get; set; } = string.Empty;
     public string Author { get; set; } = string.Empty;
+    public string? AuthorEmail { get; set; }
     public string? AuthorAvatarUrl { get; set; }
+    public PRAuthor? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public DateTime? MergedAt { get; set; }
@@ -84,6 +86,17 @@ public class PullRequest
     public int AdditionsCount { get; set; }
     public int DeletionsCount { get; set; }
     public int ChangedFilesCount { get; set; }
+}
+
+/// <summary>
+/// PR author information
+/// </summary>
+public class PRAuthor
+{
+    public string? DisplayName { get; set; }
+    public string? Email { get; set; }
+    public string? UniqueName { get; set; }
+    public string? AvatarUrl { get; set; }
 }
 
 public enum PRStatus
@@ -107,6 +120,8 @@ public class PRReviewer
 {
     public string Id { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? UniqueName { get; set; }
     public string? AvatarUrl { get; set; }
     public ReviewVote Vote { get; set; }
     public bool IsRequired { get; set; }
