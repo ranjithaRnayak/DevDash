@@ -77,7 +77,7 @@ export function useEnvironmentToggle() {
             toggle.removeEventListener("change", handleChange);
             listenerAttached.current = false;
         };
-    });
+    }, []);  // Empty dependency - only run once on mount
 
     return isTestMode;
 }
