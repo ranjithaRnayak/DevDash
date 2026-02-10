@@ -174,6 +174,20 @@ const PRAlerts = ({ dashboardId, repos }) => {
                                     </strong>
 
                                     <div className="pr-labels-container">
+                                        <span
+                                            className="source-label"
+                                            style={{
+                                                padding: '2px 6px',
+                                                borderRadius: '4px',
+                                                fontSize: '10px',
+                                                fontWeight: '500',
+                                                backgroundColor: pr.source === 'GitHub' ? 'rgba(35, 134, 54, 0.2)' : 'rgba(0, 120, 212, 0.2)',
+                                                color: pr.source === 'GitHub' ? '#238636' : '#0078d4',
+                                                border: pr.source === 'GitHub' ? '1px solid rgba(35, 134, 54, 0.4)' : '1px solid rgba(0, 120, 212, 0.4)'
+                                            }}
+                                        >
+                                            {pr.source === 'GitHub' ? 'GitHub' : 'Azure'}
+                                        </span>
                                         {isDraft && (
                                             <span
                                                 className="draft-label"
