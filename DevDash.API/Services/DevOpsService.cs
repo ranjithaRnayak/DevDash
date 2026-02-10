@@ -10,7 +10,7 @@ namespace DevDash.API.Services;
 /// </summary>
 public interface IDevOpsService
 {
-    Task<List<PipelineBuild>> GetRecentBuildsAsync(int count = 10);
+    Task<List<PipelineBuild>> GetRecentBuildsAsync(int count = 10, string? environment = null);
     Task<PipelineBuild?> GetBuildAsync(string buildId);
     Task<List<PullRequest>> GetPullRequestsAsync(PRStatus? status = null);
     Task<string?> GetBuildLogsAsync(string buildId);
@@ -70,9 +70,9 @@ public class AzureDevOpsService : IDevOpsService
         }
     }
 
-    public async Task<List<PipelineBuild>> GetRecentBuildsAsync(int count = 10)
+    public async Task<List<PipelineBuild>> GetRecentBuildsAsync(int count = 10, string? environment = null)
     {
-        var cacheKey = $"azdo:builds:recent:{count}";
+        var cacheKey = $"azdo:builds:recent:{count}:{environment ?? "all"}";
         var cached = await _cacheService.GetAsync<List<PipelineBuild>>(cacheKey);
         if (cached != null)
         {
@@ -82,8 +82,23 @@ public class AzureDevOpsService : IDevOpsService
         try
         {
             var project = _configuration["AzureDevOps:Project"];
-            var url = $"{project}/_apis/build/builds?$top={count}&api-version=7.0";
-            _logger.LogInformation("Builds API: BaseAddress={BaseAddress}, URL={Url}", _httpClient.BaseAddress, url);
+
+            // Get configured pipeline names for the environment (Dev, Test, etc.)
+            var pipelineNames = new List<string>();
+            if (!string.IsNullOrEmpty(environment))
+            {
+                var pipelinesConfig = _configuration[$"AzureDevOps:{environment}:Pipelines"];
+                if (!string.IsNullOrEmpty(pipelinesConfig))
+                {
+                    pipelineNames = pipelinesConfig.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+                }
+            }
+
+            // Fetch more builds to account for filtering (3x the requested count)
+            var fetchCount = pipelineNames.Count > 0 ? count * 3 : count;
+            var url = $"{project}/_apis/build/builds?$top={fetchCount}&api-version=7.0";
+            _logger.LogInformation("Builds API: BaseAddress={BaseAddress}, URL={Url}, Environment={Env}, Pipelines={Pipelines}",
+                _httpClient.BaseAddress, url, environment, string.Join(",", pipelineNames));
 
             var response = await _httpClient.GetAsync(url);
             _logger.LogInformation("Builds API response: {StatusCode}", response.StatusCode);
@@ -94,7 +109,24 @@ public class AzureDevOpsService : IDevOpsService
             _logger.LogInformation("Parsed builds: Value is null={IsNull}, Count={Count}",
                 result?.Value == null, result?.Value?.Count ?? 0);
 
-            var builds = result?.Value?.Select(MapToPipelineBuild).ToList() ?? new List<PipelineBuild>();
+            var allBuilds = result?.Value?.Select(MapToPipelineBuild).ToList() ?? new List<PipelineBuild>();
+
+            // Filter by configured pipeline names if environment is specified
+            List<PipelineBuild> builds;
+            if (pipelineNames.Count > 0)
+            {
+                builds = allBuilds
+                    .Where(b => pipelineNames.Any(p =>
+                        b.PipelineName?.Contains(p, StringComparison.OrdinalIgnoreCase) == true))
+                    .Take(count)
+                    .ToList();
+                _logger.LogInformation("Filtered to {FilteredCount} builds matching pipelines: {Pipelines}",
+                    builds.Count, string.Join(",", pipelineNames));
+            }
+            else
+            {
+                builds = allBuilds.Take(count).ToList();
+            }
 
             await _cacheService.SetAsync(cacheKey, builds, TimeSpan.FromMinutes(2));
             return builds;
