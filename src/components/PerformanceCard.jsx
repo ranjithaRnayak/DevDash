@@ -11,6 +11,37 @@ const PerformanceCard = () => {
     const [schedulingMeeting, setSchedulingMeeting] = useState(false);
     const hasFetched = useRef(false);
 
+    // Mock data for when API is unavailable
+    const getMockData = () => ({
+        user: { displayName: 'Demo User', email: 'demo@company.com' },
+        draftPRs: [
+            {
+                id: 101,
+                title: 'Draft: Implement new dashboard features',
+                source: 'GitHub',
+                repoName: 'devdash-ui',
+                targetBranch: 'main',
+                createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+                url: 'https://github.com/org/devdash-ui/pull/101',
+                reviewers: [{ displayName: 'John Doe', email: 'john@company.com' }]
+            }
+        ],
+        recentCommits: [
+            {
+                id: 'abc1234',
+                message: 'Fix authentication flow',
+                source: 'GitHub',
+                repoName: 'devdash-api',
+                date: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
+                url: 'https://github.com/org/devdash-api/commit/abc1234'
+            }
+        ],
+        storyPoints: { notStarted: 13, total: 5, items: [
+            { id: 1, title: 'User story: Add dark mode', storyPoints: 5, type: 'User Story', state: 'New', url: '#' },
+            { id: 2, title: 'PBI: Improve performance', storyPoints: 8, type: 'Product Backlog Item', state: 'New', url: '#' }
+        ]}
+    });
+
     useEffect(() => {
         if (hasFetched.current) return;
         hasFetched.current = true;
@@ -39,6 +70,12 @@ const PerformanceCard = () => {
                     if (pointsRes.status === 'fulfilled') setStoryPoints(pointsRes.value.data || { notStarted: 0, total: 0, items: [] });
                 } catch (fallbackErr) {
                     console.error('Fallback fetch failed:', fallbackErr);
+                    // Use mock data as last resort
+                    const mockData = getMockData();
+                    setCurrentUser(mockData.user);
+                    setDraftPRs(mockData.draftPRs);
+                    setRecentCommits(mockData.recentCommits);
+                    setStoryPoints(mockData.storyPoints);
                 }
             } finally {
                 setLoading(false);
