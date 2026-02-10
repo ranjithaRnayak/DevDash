@@ -59,12 +59,6 @@ public class AzureDevOpsService : IDevOpsService
 
         if (!string.IsNullOrEmpty(orgUrl))
         {
-            // Ensure trailing slash for proper URL resolution with relative URIs
-            // Without trailing slash, HttpClient replaces the last segment instead of appending
-            if (!orgUrl.EndsWith("/"))
-            {
-                orgUrl += "/";
-            }
             _httpClient.BaseAddress = new Uri(orgUrl);
         }
 
@@ -88,29 +82,16 @@ public class AzureDevOpsService : IDevOpsService
         try
         {
             var project = _configuration["AzureDevOps:Project"];
-            var requestUrl = $"{project}/_apis/build/builds?$top={count}&api-version=7.0";
-            var fullUrl = new Uri(_httpClient.BaseAddress!, requestUrl);
-            _logger.LogInformation("Fetching builds from: {Url}", fullUrl);
+            var response = await _httpClient.GetAsync(
+                $"{project}/_apis/build/builds?$top={count}&api-version=7.0");
 
-            var response = await _httpClient.GetAsync(requestUrl);
-
-            _logger.LogInformation("Build API response status: {StatusCode}", response.StatusCode);
             response.EnsureSuccessStatusCode();
 
-            // Use ReadFromJsonAsync which is case-insensitive by default
             var result = await response.Content.ReadFromJsonAsync<AzDoBuildsResponse>();
-            _logger.LogInformation("Parsed builds count: {Count}", result?.Value?.Count ?? 0);
-
             var builds = result?.Value?.Select(MapToPipelineBuild).ToList() ?? new List<PipelineBuild>();
 
             await _cacheService.SetAsync(cacheKey, builds, TimeSpan.FromMinutes(2));
             return builds;
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "HTTP error fetching Azure DevOps builds. BaseAddress: {BaseAddress}",
-                _httpClient.BaseAddress);
-            return new List<PipelineBuild>();
         }
         catch (Exception ex)
         {
