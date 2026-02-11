@@ -241,41 +241,56 @@ public class TestPlanService : ITestPlanService
                 Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}"
             };
 
-            var allSuites = await GetTestSuitesAsync(project, planId);
+            // Get ALL test points for the entire plan (includes all child suites)
+            var allTestPoints = await GetAllTestPointsForPlanAsync(project, planId);
 
-            List<AzDoTestSuite> suitesToProcess;
+            // Calculate plan totals
+            planSummary.TotalTests = allTestPoints.Count;
+            planSummary.PassedCount = allTestPoints.Count(tp => tp.Results?.Outcome?.Equals("passed", StringComparison.OrdinalIgnoreCase) == true);
+            planSummary.FailedCount = allTestPoints.Count(tp => tp.Results?.Outcome?.Equals("failed", StringComparison.OrdinalIgnoreCase) == true);
+            planSummary.BlockedCount = allTestPoints.Count(tp => tp.Results?.Outcome?.Equals("blocked", StringComparison.OrdinalIgnoreCase) == true);
+            planSummary.NotRunCount = planSummary.TotalTests - planSummary.PassedCount - planSummary.FailedCount - planSummary.BlockedCount;
 
-            if (suiteFilters == null || suiteFilters.Count == 0)
-            {
-                suitesToProcess = allSuites;
-            }
-            else
-            {
-                suitesToProcess = allSuites.Where(s =>
-                    suiteFilters.Any(f =>
-                        (s.Name?.Contains(f, StringComparison.OrdinalIgnoreCase) == true) ||
-                        f.Contains(s.Name ?? "", StringComparison.OrdinalIgnoreCase)))
-                    .ToList();
-            }
+            // Calculate pass rate as Passed / Executed (Azure DevOps style)
+            var executedCount = planSummary.PassedCount + planSummary.FailedCount + planSummary.BlockedCount;
+            planSummary.PassRate = executedCount > 0
+                ? Math.Round((double)planSummary.PassedCount / executedCount * 100, 1)
+                : 0;
 
-            foreach (var suite in suitesToProcess)
+            // Group test points by suite for breakdown
+            var suiteGroups = allTestPoints
+                .Where(tp => tp.TestSuite != null)
+                .GroupBy(tp => new { tp.TestSuite!.Id, tp.TestSuite.Name })
+                .ToList();
+
+            foreach (var group in suiteGroups)
             {
-                var suiteSummary = await GetSuiteProgressAsync(project, planId, suite.Id, suite.Name ?? "Unknown", orgUrl);
-                if (suiteSummary != null)
+                var suiteName = group.Key.Name ?? $"Suite {group.Key.Id}";
+
+                var passed = group.Count(tp => tp.Results?.Outcome?.Equals("passed", StringComparison.OrdinalIgnoreCase) == true);
+                var failed = group.Count(tp => tp.Results?.Outcome?.Equals("failed", StringComparison.OrdinalIgnoreCase) == true);
+                var blocked = group.Count(tp => tp.Results?.Outcome?.Equals("blocked", StringComparison.OrdinalIgnoreCase) == true);
+                var executed = passed + failed + blocked;
+
+                var suiteSummary = new TestSuiteSummary
+                {
+                    Id = group.Key.Id,
+                    PlanId = planId,
+                    Name = suiteName,
+                    Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}&suiteId={group.Key.Id}",
+                    TotalTests = group.Count(),
+                    PassedCount = passed,
+                    FailedCount = failed,
+                    BlockedCount = blocked,
+                    NotRunCount = group.Count() - executed,
+                    PassRate = executed > 0 ? Math.Round((double)passed / executed * 100, 1) : 0
+                };
+
+                if (suiteSummary.TotalTests > 0)
                 {
                     planSummary.Suites.Add(suiteSummary);
                 }
             }
-
-            // Calculate plan totals
-            planSummary.TotalTests = planSummary.Suites.Sum(s => s.TotalTests);
-            planSummary.PassedCount = planSummary.Suites.Sum(s => s.PassedCount);
-            planSummary.FailedCount = planSummary.Suites.Sum(s => s.FailedCount);
-            planSummary.BlockedCount = planSummary.Suites.Sum(s => s.BlockedCount);
-            planSummary.NotRunCount = planSummary.Suites.Sum(s => s.NotRunCount);
-            planSummary.PassRate = planSummary.TotalTests > 0
-                ? Math.Round((double)planSummary.PassedCount / planSummary.TotalTests * 100, 1)
-                : 0;
 
             return planSummary;
         }
@@ -283,6 +298,50 @@ public class TestPlanService : ITestPlanService
         {
             _logger.LogError(ex, "Failed to get test plan progress from REST API for plan {PlanId}", planId);
             return null;
+        }
+    }
+
+    private async Task<List<AzDoTestPoint>> GetAllTestPointsForPlanAsync(string project, int planId)
+    {
+        var allPoints = new List<AzDoTestPoint>();
+        string? continuationToken = null;
+
+        try
+        {
+            do
+            {
+                var url = $"{project}/_apis/testplan/Plans/{planId}/TestPoints?api-version=7.0";
+                if (!string.IsNullOrEmpty(continuationToken))
+                {
+                    url += $"&continuationToken={continuationToken}";
+                }
+
+                var response = await _httpClient.GetAsync(url);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Failed to get test points for plan {PlanId}: {StatusCode}", planId, response.StatusCode);
+                    break;
+                }
+
+                var result = await response.Content.ReadFromJsonAsync<AzDoTestPointsResponse>();
+                var points = result?.Value ?? new List<AzDoTestPoint>();
+                allPoints.AddRange(points);
+
+                continuationToken = null;
+                if (response.Headers.TryGetValues("x-ms-continuationtoken", out var tokens))
+                {
+                    continuationToken = tokens.FirstOrDefault();
+                }
+
+            } while (!string.IsNullOrEmpty(continuationToken));
+
+            return allPoints;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch all test points for plan {PlanId}", planId);
+            return allPoints;
         }
     }
 
@@ -524,6 +583,13 @@ public class TestPlanService : ITestPlanService
         public string? Url { get; set; }
         public AzDoTestCase? TestCase { get; set; }
         public AzDoTestResults? Results { get; set; }
+        public AzDoTestSuiteRef? TestSuite { get; set; }
+    }
+
+    private class AzDoTestSuiteRef
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
     }
 
     private class AzDoTestCase
