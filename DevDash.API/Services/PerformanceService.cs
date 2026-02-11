@@ -413,6 +413,73 @@ public class PerformanceService : IPerformanceService
     }
 
     /// <summary>
+    /// Get the team name for a user by finding which team they belong to
+    /// </summary>
+    private async Task<string?> GetUserTeamNameAsync(AzDoUserInfo user)
+    {
+        try
+        {
+            // Check cache first
+            var cacheKey = $"azdo:user-team:{user.Id}";
+            var cachedTeam = await _cacheService.GetAsync<string>(cacheKey);
+            if (!string.IsNullOrEmpty(cachedTeam))
+            {
+                _logger.LogDebug("Returning cached team for user {UserId}: {Team}", user.Id, cachedTeam);
+                return cachedTeam;
+            }
+
+            var project = _configuration["AzureDevOps:Project"];
+
+            // Get all teams in the project
+            var teamsResponse = await _azDoClient.GetAsync($"_apis/projects/{project}/teams?api-version=7.0");
+            if (!teamsResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch teams: {StatusCode}", teamsResponse.StatusCode);
+                return null;
+            }
+
+            var teamsResult = await teamsResponse.Content.ReadFromJsonAsync<TeamsListResponse>();
+            var teams = teamsResult?.Value ?? new List<TeamInfo>();
+
+            // Find which team the user belongs to
+            foreach (var team in teams)
+            {
+                var membersResponse = await _azDoClient.GetAsync(
+                    $"_apis/projects/{project}/teams/{team.Id}/members?api-version=7.0");
+
+                if (!membersResponse.IsSuccessStatusCode)
+                    continue;
+
+                var membersResult = await membersResponse.Content.ReadFromJsonAsync<TeamMembersListResponse>();
+                var members = membersResult?.Value ?? new List<TeamMemberItem>();
+
+                // Check if current user is in this team
+                var userMember = members.FirstOrDefault(m =>
+                    string.Equals(m.Identity?.Id, user.Id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.Identity?.UniqueName, user.Email, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.Identity?.UniqueName, user.UniqueName, StringComparison.OrdinalIgnoreCase));
+
+                if (userMember != null && !string.IsNullOrEmpty(team.Name))
+                {
+                    _logger.LogInformation("Found user {UserId} in team {TeamName}", user.Id, team.Name);
+
+                    // Cache for 1 hour
+                    await _cacheService.SetAsync(cacheKey, team.Name, TimeSpan.FromHours(1));
+                    return team.Name;
+                }
+            }
+
+            _logger.LogWarning("User {UserId} not found in any team", user.Id);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting team name for user {UserId}", user.Id);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Get draft PRs created by the authenticated user (matches Azure DevOps "Mine" view)
     /// </summary>
     public async Task<List<DraftPullRequest>> GetMyDraftPRsAsync()
@@ -579,7 +646,14 @@ public class PerformanceService : IPerformanceService
         {
             var user = await GetAuthenticatedAzDoUserAsync();
             var project = _configuration["AzureDevOps:Project"];
-            var team = _configuration["AzureDevOps:Team"] ?? $"{project} Team";
+
+            // Try to get team name from user's team membership
+            var team = await GetUserTeamNameAsync(user);
+            if (string.IsNullOrEmpty(team))
+            {
+                // Fallback to config or default
+                team = _configuration["AzureDevOps:Team"] ?? $"{project} Team";
+            }
 
             _logger.LogInformation("Fetching story points for user: {Email}, Project: {Project}, Team: {Team}",
                 user.Email, project, team);
