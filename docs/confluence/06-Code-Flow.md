@@ -324,6 +324,64 @@ AIAssistant.jsx
 
 ---
 
+### 6. TestPlanProgress (Test Dashboard Only)
+
+**Purpose:** Display Azure DevOps test plan execution progress with pass rates.
+
+**Why Needed:**
+- Track test execution across test plans and suites
+- Visual progress bars for pass/fail/not-run status
+- Direct links to Azure DevOps test plans
+
+**Data Flow:**
+```
+TestPlanProgress.jsx
+    └── devOpsAPI.getTestPlanProgress()
+        └── DevOpsController.GetTestPlanProgress()
+            └── TestPlanService.GetTestPlanProgressAsync()
+                │
+                ├── GetAllTestPlansAsync()
+                │   └── Analytics API (preferred) or REST API
+                │
+                ├── GetAllSuitesForPlanAsync()
+                │   └── REST API with pagination
+                │
+                └── GetTestPointsForSuiteAsync() [PARALLEL]
+                    └── All suites fetched concurrently
+                        └── Deduplicate by TestCase.Id
+                            └── Calculate pass rates
+```
+
+**Key Features:**
+- **Parallel API Calls:** Suite test points fetched concurrently for performance
+- **Test Case Deduplication:** Same test case in multiple suites counted once
+- **Outcome Classification:** Matches Azure DevOps Analytics API behavior
+
+**Outcome Categories:**
+| Category | Outcomes | Counts As |
+|----------|----------|-----------|
+| Passed | passed | Executed |
+| Failed | failed | Executed |
+| Blocked | blocked | Executed |
+| Other Executed | notApplicable, inProgress, paused, error, warning, timeout, aborted, inconclusive | Executed |
+| Not Run | none, unspecified, notExecuted, null/empty | Not Executed |
+
+**Pass Rate Formula:** `Passed / TotalExecuted * 100`
+
+**Configuration:**
+```json
+{
+  "TestPlans": {
+    "Plans": [
+      { "Name": "Regression Test Plan", "Suites": [] }
+    ],
+    "CacheDurationMinutes": 5
+  }
+}
+```
+
+---
+
 ## API Client Architecture
 
 ### Why Centralized backendClient.js
@@ -605,6 +663,7 @@ DevDash/
 │   │   ├── PRAlerts.jsx        # PR tracking card
 │   │   ├── CodeQuality.jsx     # SonarQube metrics
 │   │   ├── PerformanceCard.jsx # Personal metrics
+│   │   ├── TestPlanProgress.jsx # Test plan pass rates
 │   │   └── AIAssistant.jsx     # AI chat
 │   ├── context/
 │   │   └── AuthContext.jsx     # Auth state management
@@ -627,6 +686,7 @@ DevDash/
     ├── Services/
     │   ├── DevOpsService.cs       # Azure DevOps & GitHub integration
     │   ├── PerformanceService.cs  # User-specific metrics (dual auth)
+    │   ├── TestPlanService.cs     # Test plan progress (parallel API)
     │   ├── SonarQubeService.cs
     │   ├── CacheService.cs        # In-memory/Redis caching
     │   └── AIService.cs
