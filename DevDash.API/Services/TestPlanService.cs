@@ -272,9 +272,9 @@ public class TestPlanService : ITestPlanService
         {
             Console.WriteLine($"[TestPlanService] Fetching Analytics data for plan {planId}...");
 
-            // Query TestPointHistorySnapshot with groupby on TestSuite and Outcome
-            // This gives us counts per suite and outcome
-            var oDataQuery = $"$apply=filter(TestPlanId eq {planId})/groupby((TestSuiteId, TestSuiteTitle, Outcome), aggregate($count as Count))";
+            // Query TestPointHistorySnapshot grouped by TestSuite to get per-suite counts
+            // Get the latest snapshot by ordering by DateSK desc
+            var oDataQuery = $"$apply=filter(TestPlanId eq {planId})/groupby((TestSuiteId, TestSuiteTitle, DateSK), aggregate(Passed with sum as Passed, Failed with sum as Failed, Blocked with sum as Blocked, NotExecuted with sum as NotExecuted, TotalCount with sum as TotalCount))&$orderby=DateSK desc";
             var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestPointHistorySnapshot?{oDataQuery}";
 
             Console.WriteLine($"[TestPlanService] Analytics URL: {analyticsUrl}");
@@ -283,6 +283,7 @@ public class TestPlanService : ITestPlanService
             var responseContent = await response.Content.ReadAsStringAsync();
 
             Console.WriteLine($"[TestPlanService] Analytics response status: {response.StatusCode}");
+            Console.WriteLine($"[TestPlanService] Response preview: {responseContent.Substring(0, Math.Min(500, responseContent.Length))}...");
 
             if (!response.IsSuccessStatusCode)
             {
@@ -294,7 +295,7 @@ public class TestPlanService : ITestPlanService
                 return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
             }
 
-            var analyticsResult = JsonSerializer.Deserialize<ODataResponse<TestPointAnalytics>>(responseContent, new JsonSerializerOptions
+            var analyticsResult = JsonSerializer.Deserialize<ODataResponse<TestPointHistorySnapshotResult>>(responseContent, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
@@ -314,17 +315,20 @@ public class TestPlanService : ITestPlanService
                 Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}"
             };
 
-            // Group by suite
-            var suiteGroups = analyticsResult.Value
-                .GroupBy(r => new { r.TestSuiteId, r.TestSuiteTitle })
+            // Get the latest date's data for each suite
+            var latestDateSK = analyticsResult.Value.Max(r => r.DateSK);
+            Console.WriteLine($"[TestPlanService] Latest DateSK: {latestDateSK}");
+
+            var latestData = analyticsResult.Value
+                .Where(r => r.DateSK == latestDateSK)
                 .ToList();
 
-            Console.WriteLine($"[TestPlanService] Found {suiteGroups.Count} suites in Analytics data");
+            Console.WriteLine($"[TestPlanService] Found {latestData.Count} suites with latest data");
 
-            foreach (var suiteGroup in suiteGroups)
+            foreach (var row in latestData)
             {
-                var suiteName = suiteGroup.Key.TestSuiteTitle ?? $"Suite {suiteGroup.Key.TestSuiteId}";
-                var suiteId = suiteGroup.Key.TestSuiteId;
+                var suiteName = row.TestSuiteTitle ?? $"Suite {row.TestSuiteId}";
+                var suiteId = row.TestSuiteId ?? 0;
 
                 // Check if suite matches filters (if any)
                 if (suiteFilters != null && suiteFilters.Count > 0)
@@ -344,39 +348,20 @@ public class TestPlanService : ITestPlanService
                     Id = suiteId,
                     PlanId = planId,
                     Name = suiteName,
-                    Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}&suiteId={suiteId}"
+                    Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}&suiteId={suiteId}",
+                    TotalTests = row.TotalCount,
+                    PassedCount = row.Passed,
+                    FailedCount = row.Failed,
+                    BlockedCount = row.Blocked,
+                    NotRunCount = row.NotExecuted
                 };
-
-                foreach (var row in suiteGroup)
-                {
-                    var outcome = row.Outcome?.ToLowerInvariant() ?? "notrun";
-                    var count = row.Count;
-
-                    suiteSummary.TotalTests += count;
-
-                    switch (outcome)
-                    {
-                        case "passed":
-                            suiteSummary.PassedCount += count;
-                            break;
-                        case "failed":
-                            suiteSummary.FailedCount += count;
-                            break;
-                        case "blocked":
-                            suiteSummary.BlockedCount += count;
-                            break;
-                        default:
-                            suiteSummary.NotRunCount += count;
-                            break;
-                    }
-                }
 
                 suiteSummary.PassRate = suiteSummary.TotalTests > 0
                     ? Math.Round((double)suiteSummary.PassedCount / suiteSummary.TotalTests * 100, 1)
                     : 0;
 
                 planSummary.Suites.Add(suiteSummary);
-                Console.WriteLine($"[TestPlanService]   Suite '{suiteName}': {suiteSummary.TotalTests} tests, {suiteSummary.PassRate}% passed");
+                Console.WriteLine($"[TestPlanService]   Suite '{suiteName}': {suiteSummary.TotalTests} tests, {suiteSummary.PassedCount} passed, {suiteSummary.FailedCount} failed");
             }
 
             // Calculate plan totals
@@ -388,6 +373,8 @@ public class TestPlanService : ITestPlanService
             planSummary.PassRate = planSummary.TotalTests > 0
                 ? Math.Round((double)planSummary.PassedCount / planSummary.TotalTests * 100, 1)
                 : 0;
+
+            Console.WriteLine($"[TestPlanService] Plan total: {planSummary.TotalTests} tests, {planSummary.PassRate}% pass rate");
 
             return planSummary;
         }
@@ -583,6 +570,20 @@ public class TestPlanService : ITestPlanService
         public string? TestSuiteTitle { get; set; }
         public string? Outcome { get; set; }
         public int Count { get; set; }
+    }
+
+    private class TestPointHistorySnapshotResult
+    {
+        public int DateSK { get; set; }
+        public int Executed { get; set; }
+        public int NotExecuted { get; set; }
+        public int NotApplicable { get; set; }
+        public int Blocked { get; set; }
+        public int Failed { get; set; }
+        public int Passed { get; set; }
+        public int TotalCount { get; set; }
+        public int? TestSuiteId { get; set; }
+        public string? TestSuiteTitle { get; set; }
     }
 
     private class AzDoTestPlansResponse
