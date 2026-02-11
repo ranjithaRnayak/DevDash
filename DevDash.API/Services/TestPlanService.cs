@@ -43,6 +43,13 @@ public class TestPlanService : ITestPlanService
         var project = _configuration["AzureDevOps:Project"];
         var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
 
+        // Console output for debugging
+        Console.WriteLine($"[TestPlanService] Initialized - OrgUrl: {orgUrl ?? "NOT SET"}, Project: {project ?? "NOT SET"}, PAT: {!string.IsNullOrEmpty(pat)}, Plans: {plansConfig.Count}");
+        foreach (var plan in plansConfig)
+        {
+            Console.WriteLine($"[TestPlanService] Configured plan: '{plan.Name}' with {plan.Suites?.Count ?? 0} suites");
+        }
+
         _logger.LogInformation("TestPlanService initialized - OrgUrl: {OrgUrl}, Project: {Project}, PAT configured: {HasPAT}, Plans configured: {PlanCount}",
             orgUrl ?? "NOT SET",
             project ?? "NOT SET",
@@ -72,6 +79,7 @@ public class TestPlanService : ITestPlanService
 
     public async Task<TestPlanProgress> GetTestPlanProgressAsync()
     {
+        Console.WriteLine("[TestPlanService] GetTestPlanProgressAsync called");
         _logger.LogInformation("GetTestPlanProgressAsync called");
 
         var cacheDuration = _configuration.GetValue<int>("TestPlans:CacheDurationMinutes", 5);
