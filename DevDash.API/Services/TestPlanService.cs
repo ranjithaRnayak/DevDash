@@ -304,13 +304,40 @@ public class TestPlanService : ITestPlanService
     private async Task<List<AzDoTestPoint>> GetAllTestPointsForPlanAsync(string project, int planId)
     {
         var allPoints = new List<AzDoTestPoint>();
+
+        try
+        {
+            // First, get all suites for this plan
+            var suites = await GetAllSuitesForPlanAsync(project, planId);
+            _logger.LogInformation("Found {SuiteCount} suites for plan {PlanId}", suites.Count, planId);
+
+            // Get test points from each suite
+            foreach (var suite in suites)
+            {
+                var suitePoints = await GetTestPointsForSuiteAsync(project, planId, suite.Id, suite.Name);
+                allPoints.AddRange(suitePoints);
+            }
+
+            _logger.LogInformation("Total test points for plan {PlanId}: {PointCount}", planId, allPoints.Count);
+            return allPoints;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch all test points for plan {PlanId}", planId);
+            return allPoints;
+        }
+    }
+
+    private async Task<List<AzDoTestSuiteInfo>> GetAllSuitesForPlanAsync(string project, int planId)
+    {
+        var allSuites = new List<AzDoTestSuiteInfo>();
         string? continuationToken = null;
 
         try
         {
             do
             {
-                var url = $"{project}/_apis/testplan/Plans/{planId}/TestPoints?api-version=7.0";
+                var url = $"{project}/_apis/testplan/Plans/{planId}/suites?api-version=7.0&asTreeView=false";
                 if (!string.IsNullOrEmpty(continuationToken))
                 {
                     url += $"&continuationToken={continuationToken}";
@@ -320,12 +347,65 @@ public class TestPlanService : ITestPlanService
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning("Failed to get test points for plan {PlanId}: {StatusCode}", planId, response.StatusCode);
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Failed to get suites for plan {PlanId}: {StatusCode} - {Error}",
+                        planId, response.StatusCode, errorContent);
+                    break;
+                }
+
+                var result = await response.Content.ReadFromJsonAsync<AzDoTestSuitesInfoResponse>();
+                var suites = result?.Value ?? new List<AzDoTestSuiteInfo>();
+                allSuites.AddRange(suites);
+
+                continuationToken = null;
+                if (response.Headers.TryGetValues("x-ms-continuationtoken", out var tokens))
+                {
+                    continuationToken = tokens.FirstOrDefault();
+                }
+
+            } while (!string.IsNullOrEmpty(continuationToken));
+
+            return allSuites;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch suites for plan {PlanId}", planId);
+            return allSuites;
+        }
+    }
+
+    private async Task<List<AzDoTestPoint>> GetTestPointsForSuiteAsync(string project, int planId, int suiteId, string? suiteName)
+    {
+        var allPoints = new List<AzDoTestPoint>();
+        string? continuationToken = null;
+
+        try
+        {
+            do
+            {
+                var url = $"{project}/_apis/testplan/Plans/{planId}/Suites/{suiteId}/TestPoint?api-version=7.0";
+                if (!string.IsNullOrEmpty(continuationToken))
+                {
+                    url += $"&continuationToken={continuationToken}";
+                }
+
+                var response = await _httpClient.GetAsync(url);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    // Some suites may not have test points, that's OK
                     break;
                 }
 
                 var result = await response.Content.ReadFromJsonAsync<AzDoTestPointsResponse>();
                 var points = result?.Value ?? new List<AzDoTestPoint>();
+
+                // Set suite info on each point for grouping later
+                foreach (var point in points)
+                {
+                    point.TestSuite = new AzDoTestSuiteRef { Id = suiteId, Name = suiteName };
+                }
+
                 allPoints.AddRange(points);
 
                 continuationToken = null;
@@ -340,7 +420,7 @@ public class TestPlanService : ITestPlanService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to fetch all test points for plan {PlanId}", planId);
+            _logger.LogError(ex, "Failed to fetch test points for suite {SuiteId}", suiteId);
             return allPoints;
         }
     }
@@ -569,6 +649,19 @@ public class TestPlanService : ITestPlanService
     {
         public int Id { get; set; }
         public string? Name { get; set; }
+    }
+
+    private class AzDoTestSuitesInfoResponse
+    {
+        public List<AzDoTestSuiteInfo>? Value { get; set; }
+        public int Count { get; set; }
+    }
+
+    private class AzDoTestSuiteInfo
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+        public string? SuiteType { get; set; }
     }
 
     private class AzDoTestPointsResponse
