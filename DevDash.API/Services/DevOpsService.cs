@@ -329,7 +329,7 @@ public class AzureDevOpsService : IDevOpsService
         {
             Id = pr.PullRequestId.ToString(),
             Number = pr.PullRequestId,
-            Title = pr.Title,
+            Title = pr.Title ?? "",
             Description = pr.Description ?? "",
             Status = pr.IsDraft ? PRStatus.Draft : MapPRStatus(pr.Status),
             SourceBranch = pr.SourceRefName?.Replace("refs/heads/", "") ?? "",
