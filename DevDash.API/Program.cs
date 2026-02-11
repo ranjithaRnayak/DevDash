@@ -185,6 +185,15 @@ builder.Services.AddHttpClient("MicrosoftGraph", client =>
 builder.Services.AddScoped<IPerformanceService, PerformanceService>();
 
 // ============================================
+// Test Plan Service (Azure DevOps Test Plans)
+// ============================================
+
+builder.Services.AddHttpClient<ITestPlanService, TestPlanService>(client =>
+{
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
+// ============================================
 // Copilot Service (GitHub Copilot Chat)
 // ============================================
 

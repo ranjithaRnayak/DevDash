@@ -209,3 +209,61 @@ public class TeamMember
     public string? AvatarUrl { get; set; }
     public string Source { get; set; } = string.Empty; // "AzureDevOps" or "GitHub"
 }
+
+/// <summary>
+/// Test Plan progress summary
+/// </summary>
+public class TestPlanProgress
+{
+    public List<TestPlanSummary> Plans { get; set; } = new();
+    public int TotalTestCases { get; set; }
+    public int PassedCount { get; set; }
+    public int FailedCount { get; set; }
+    public int BlockedCount { get; set; }
+    public int NotRunCount { get; set; }
+    public double OverallPassRate { get; set; }
+    public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Individual test plan summary
+/// </summary>
+public class TestPlanSummary
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public List<TestSuiteSummary> Suites { get; set; } = new();
+    public int TotalTests { get; set; }
+    public int PassedCount { get; set; }
+    public int FailedCount { get; set; }
+    public int BlockedCount { get; set; }
+    public int NotRunCount { get; set; }
+    public double PassRate { get; set; }
+}
+
+/// <summary>
+/// Individual test suite summary
+/// </summary>
+public class TestSuiteSummary
+{
+    public int Id { get; set; }
+    public int PlanId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Url { get; set; }
+    public int TotalTests { get; set; }
+    public int PassedCount { get; set; }
+    public int FailedCount { get; set; }
+    public int BlockedCount { get; set; }
+    public int NotRunCount { get; set; }
+    public double PassRate { get; set; }
+}
+
+/// <summary>
+/// Configuration for a test plan - used for appsettings.json binding
+/// </summary>
+public class TestPlanConfig
+{
+    public string Name { get; set; } = string.Empty;
+    public List<string> Suites { get; set; } = new();
+}

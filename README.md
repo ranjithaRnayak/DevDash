@@ -142,6 +142,38 @@ cp secrets.config.json.template secrets.config.json
 | `StoryPoints.ExcludeStates` | States to exclude (Done, Closed) |
 | `StoryPoints.CurrentIterationOnly` | Only show current sprint items |
 
+### Test Plans (Test Dashboard Only)
+
+| Setting | Description |
+|---------|-------------|
+| `TestPlans.Plans[].Name` | Test plan name (partial matching supported) |
+| `TestPlans.Plans[].Suites` | Array of suite names to track (empty = all suites) |
+| `TestPlans.CacheDurationMinutes` | Cache duration for test plan data |
+
+**Example Configuration:**
+```json
+{
+  "TestPlans": {
+    "Plans": [
+      {
+        "Name": "Power Operation 2024 Regression",
+        "Suites": []
+      },
+      {
+        "Name": "Integration Test Plan",
+        "Suites": ["Team Pi / Regression", "Team Pi / Smoke Tests"]
+      }
+    ],
+    "CacheDurationMinutes": 5
+  }
+}
+```
+
+**Notes:**
+- Empty `Suites` array includes all suites under the plan
+- Partial name matching works for hierarchical paths like `"Plan / Team / Suite"`
+- Test Plan Progress card only appears on the Test Dashboard
+
 ---
 
 ## AI Provider Configuration
@@ -165,6 +197,7 @@ cp secrets.config.json.template secrets.config.json
 | **Pipeline Status** | Clickable builds with direct links to Azure DevOps. Environment-based filtering (Dev/Test) |
 | **Dual Auth** | Supports both PAT token and Entra ID authentication modes |
 | **Team Resolution** | Automatically resolves user's team membership for sprint filtering |
+| **Test Plan Progress** | Test dashboard card showing test plan/suite pass rates with progress bars (Test environment only) |
 
 ---
 

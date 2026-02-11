@@ -76,6 +76,7 @@ export const devOpsAPI = {
     apiClient.get(`/devops/pullrequests/github/${prNumber}`),
   getPRAlertsConfig: () => apiClient.get('/devops/pralerts/config'),
   getTeamMembers: () => apiClient.get('/devops/team/members'),
+  getTestPlanProgress: () => apiClient.get('/devops/testplans/progress'),
 };
 
 export const healthAPI = {
