@@ -272,10 +272,10 @@ public class TestPlanService : ITestPlanService
         {
             Console.WriteLine($"[TestPlanService] Fetching Analytics data for plan {planId}...");
 
-            // Query TestPoints with groupby on TestSuite and Outcome
+            // Query TestPointHistorySnapshot with groupby on TestSuite and Outcome
             // This gives us counts per suite and outcome
             var oDataQuery = $"$apply=filter(TestPlanId eq {planId})/groupby((TestSuiteId, TestSuiteTitle, Outcome), aggregate($count as Count))";
-            var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestPoints?{oDataQuery}";
+            var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestPointHistorySnapshot?{oDataQuery}";
 
             Console.WriteLine($"[TestPlanService] Analytics URL: {analyticsUrl}");
 
