@@ -338,19 +338,13 @@ public class DevOpsController : ControllerBase
     [HttpGet("testplans/progress")]
     public async Task<ActionResult<TestPlanProgress>> GetTestPlanProgress([FromQuery] bool refresh = false)
     {
-        Console.WriteLine($"[DevOpsController] GetTestPlanProgress endpoint called (refresh: {refresh})");
-        _logger.LogInformation("GetTestPlanProgress endpoint called (refresh: {Refresh})", refresh);
         try
         {
             var progress = await _testPlanService.GetTestPlanProgressAsync(bypassCache: refresh);
-            Console.WriteLine($"[DevOpsController] Test plan progress: {progress.Plans.Count} plans, {progress.TotalTestCases} total tests");
-            _logger.LogInformation("Test plan progress fetched: {PlanCount} plans, {TotalTests} total tests",
-                progress.Plans.Count, progress.TotalTestCases);
             return Ok(progress);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DevOpsController] ERROR: {ex.Message}");
             _logger.LogError(ex, "Failed to fetch test plan progress");
             return StatusCode(500, new { error = "Failed to fetch test plan progress" });
         }
@@ -362,17 +356,13 @@ public class DevOpsController : ControllerBase
     [HttpGet("testplans/debug")]
     public ActionResult<TestPlanDebugInfo> GetTestPlanDebugInfo()
     {
-        Console.WriteLine("[DevOpsController] GetTestPlanDebugInfo endpoint called");
-        _logger.LogInformation("GetTestPlanDebugInfo endpoint called");
         try
         {
             var debugInfo = _testPlanService.GetDebugInfo();
-            Console.WriteLine($"[DevOpsController] Debug info: OrgUrl={debugInfo.OrganizationUrl}, Project={debugInfo.Project}, Plans={debugInfo.ConfiguredPlanCount}");
             return Ok(debugInfo);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DevOpsController] DEBUG ERROR: {ex.Message}");
             _logger.LogError(ex, "Failed to get test plan debug info");
             return StatusCode(500, new { error = ex.Message });
         }
@@ -384,35 +374,15 @@ public class DevOpsController : ControllerBase
     [HttpGet("testplans/available")]
     public async Task<ActionResult<List<AvailableTestPlan>>> GetAvailableTestPlans()
     {
-        Console.WriteLine("[DevOpsController] GetAvailableTestPlans endpoint called");
-        _logger.LogInformation("GetAvailableTestPlans endpoint called");
         try
         {
             var plans = await _testPlanService.GetAvailableTestPlansAsync();
-            Console.WriteLine($"[DevOpsController] Found {plans.Count} available test plans");
             return Ok(plans);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[DevOpsController] ERROR listing plans: {ex.Message}");
             _logger.LogError(ex, "Failed to list available test plans");
             return StatusCode(500, new { error = ex.Message });
         }
-    }
-
-    /// <summary>
-    /// Simple ping endpoint to verify code deployment - returns build timestamp
-    /// </summary>
-    [HttpGet("testplans/ping")]
-    [AllowAnonymous]
-    public ActionResult<object> PingTestPlans()
-    {
-        var buildTime = "2026-02-11T17:55:00Z"; // Update this timestamp to verify deployment
-        Console.WriteLine($"[DevOpsController] PING! Build time: {buildTime}");
-        return Ok(new {
-            message = "TestPlan endpoints are available",
-            buildTime = buildTime,
-            timestamp = DateTime.UtcNow
-        });
     }
 }

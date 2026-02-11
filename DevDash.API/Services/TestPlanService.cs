@@ -63,55 +63,26 @@ public class TestPlanService : ITestPlanService
         _cacheService = cacheService;
         _logger = logger;
 
-        Console.WriteLine("========================================");
-        Console.WriteLine("[TestPlanService] CONSTRUCTOR CALLED");
-        Console.WriteLine("========================================");
-
         ConfigureHttpClient();
     }
 
     private void ConfigureHttpClient()
     {
-        Console.WriteLine("[TestPlanService] ConfigureHttpClient() starting...");
-
         var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
-        Console.WriteLine($"[TestPlanService] AzureDevOps:OrganizationUrl = '{orgUrl ?? "NULL"}'");
-
         var pat = _configuration["AzureDevOps:PAT"];
-        Console.WriteLine($"[TestPlanService] AzureDevOps:PAT exists = {!string.IsNullOrEmpty(pat)}");
-
         var project = _configuration["AzureDevOps:Project"];
-        Console.WriteLine($"[TestPlanService] AzureDevOps:Project = '{project ?? "NULL"}'");
-
         var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
-        Console.WriteLine($"[TestPlanService] TestPlans:Plans deserialized count = {plansConfig.Count}");
-
-        foreach (var plan in plansConfig)
-        {
-            Console.WriteLine($"[TestPlanService] Configured plan: Name='{plan.Name}', Suites count={plan.Suites?.Count ?? 0}");
-            if (plan.Suites != null && plan.Suites.Count > 0)
-            {
-                foreach (var suite in plan.Suites)
-                {
-                    Console.WriteLine($"[TestPlanService]   - Suite: '{suite}'");
-                }
-            }
-        }
 
         // Extract organization name from URL
-        // From https://se-tfs.visualstudio.com -> SE-TFS
-        // From https://dev.azure.com/SE-TFS -> SE-TFS
         if (!string.IsNullOrEmpty(orgUrl))
         {
             if (orgUrl.Contains("visualstudio.com"))
             {
-                // Format: https://org-name.visualstudio.com
                 var uri = new Uri(orgUrl);
                 _organization = uri.Host.Split('.')[0];
             }
             else if (orgUrl.Contains("dev.azure.com"))
             {
-                // Format: https://dev.azure.com/org-name
                 var uri = new Uri(orgUrl);
                 _organization = uri.AbsolutePath.Trim('/').Split('/')[0];
             }
@@ -121,15 +92,11 @@ public class TestPlanService : ITestPlanService
             }
 
             _analyticsBaseUrl = $"https://analytics.dev.azure.com/{_organization}";
-            Console.WriteLine($"[TestPlanService] Organization extracted: '{_organization}'");
-            Console.WriteLine($"[TestPlanService] Analytics base URL: '{_analyticsBaseUrl}'");
         }
 
-        _logger.LogInformation("TestPlanService initialized - OrgUrl: {OrgUrl}, Analytics: {AnalyticsUrl}, Project: {Project}, PAT configured: {HasPAT}, Plans configured: {PlanCount}",
-            orgUrl ?? "NOT SET",
+        _logger.LogInformation("TestPlanService initialized - Analytics: {AnalyticsUrl}, Project: {Project}, Plans configured: {PlanCount}",
             _analyticsBaseUrl ?? "NOT SET",
             project ?? "NOT SET",
-            !string.IsNullOrEmpty(pat),
             plansConfig.Count);
 
         if (string.IsNullOrEmpty(orgUrl))
@@ -138,7 +105,6 @@ public class TestPlanService : ITestPlanService
             return;
         }
 
-        // Set base address for regular REST API (used for getting plan list)
         _httpClient.BaseAddress = new Uri(orgUrl.TrimEnd('/') + "/");
 
         if (!string.IsNullOrEmpty(pat))
@@ -151,7 +117,6 @@ public class TestPlanService : ITestPlanService
 
     public TestPlanDebugInfo GetDebugInfo()
     {
-        Console.WriteLine("[TestPlanService] GetDebugInfo called");
         var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
         var project = _configuration["AzureDevOps:Project"];
         var pat = _configuration["AzureDevOps:PAT"];
@@ -172,8 +137,6 @@ public class TestPlanService : ITestPlanService
 
     public async Task<TestPlanProgress> GetTestPlanProgressAsync(bool bypassCache = false)
     {
-        Console.WriteLine($"[TestPlanService] GetTestPlanProgressAsync called (bypassCache: {bypassCache})");
-
         var cacheDuration = _configuration.GetValue<int>("TestPlans:CacheDurationMinutes", 5);
         var cacheKey = "testplans:progress";
 
@@ -182,58 +145,37 @@ public class TestPlanService : ITestPlanService
             var cached = await _cacheService.GetAsync<TestPlanProgress>(cacheKey);
             if (cached != null)
             {
-                Console.WriteLine("[TestPlanService] Returning cached test plan progress");
                 return cached;
             }
-        }
-        else
-        {
-            Console.WriteLine("[TestPlanService] Bypassing cache");
         }
 
         try
         {
-            Console.WriteLine("[TestPlanService] Starting to fetch test plan progress...");
-
             var project = _configuration["AzureDevOps:Project"];
             var orgUrl = _configuration["AzureDevOps:OrganizationUrl"]?.TrimEnd('/');
-
-            Console.WriteLine($"[TestPlanService] Project: '{project}', OrgUrl: '{orgUrl}'");
-            Console.WriteLine($"[TestPlanService] Analytics URL: '{_analyticsBaseUrl}'");
-
             var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
-            Console.WriteLine($"[TestPlanService] Plans configured: {plansConfig.Count}");
 
             if (plansConfig.Count == 0)
             {
-                Console.WriteLine("[TestPlanService] WARNING: No test plans configured!");
+                _logger.LogWarning("No test plans configured");
                 return new TestPlanProgress();
             }
 
             var progress = new TestPlanProgress();
-
-            // First, get all test plans using REST API
             var allPlans = await GetAllTestPlansAsync(project!);
-            Console.WriteLine($"[TestPlanService] Found {allPlans.Count} test plans from REST API");
 
             foreach (var planConfig in plansConfig)
             {
-                Console.WriteLine($"[TestPlanService] Processing plan config: '{planConfig.Name}'");
-
                 var matchingPlan = allPlans.FirstOrDefault(p =>
                     p.Name?.Contains(planConfig.Name, StringComparison.OrdinalIgnoreCase) == true ||
                     planConfig.Name.Contains(p.Name ?? "", StringComparison.OrdinalIgnoreCase));
 
                 if (matchingPlan == null)
                 {
-                    Console.WriteLine($"[TestPlanService] WARNING: Plan '{planConfig.Name}' not found!");
                     _logger.LogWarning("Test plan '{PlanName}' not found", planConfig.Name);
                     continue;
                 }
 
-                Console.WriteLine($"[TestPlanService] Matched to plan ID: {matchingPlan.Id}, Name: '{matchingPlan.Name}'");
-
-                // Use Analytics OData API to get test point outcomes
                 var planSummary = await GetTestPlanProgressFromAnalyticsAsync(
                     project!,
                     matchingPlan.Id,
@@ -258,14 +200,14 @@ public class TestPlanService : ITestPlanService
                 : 0;
             progress.GeneratedAt = DateTime.UtcNow;
 
-            Console.WriteLine($"[TestPlanService] Final result: {progress.Plans.Count} plans, {progress.TotalTestCases} tests, {progress.OverallPassRate}% pass rate");
+            _logger.LogInformation("Test plan progress: {PlanCount} plans, {TotalTests} tests, {PassRate}% pass rate",
+                progress.Plans.Count, progress.TotalTestCases, progress.OverallPassRate);
 
             await _cacheService.SetAsync(cacheKey, progress, TimeSpan.FromMinutes(cacheDuration));
             return progress;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TestPlanService] ERROR: {ex.Message}");
             _logger.LogError(ex, "Failed to fetch test plan progress");
             return new TestPlanProgress();
         }
@@ -280,28 +222,16 @@ public class TestPlanService : ITestPlanService
     {
         try
         {
-            Console.WriteLine($"[TestPlanService] Fetching Analytics data for plan {planId}...");
-
             // Query TestPointHistorySnapshot grouped by TestSuite to get per-suite counts
-            // Get the latest snapshot by ordering by DateSK desc
             var oDataQuery = $"$apply=filter(TestPlanId eq {planId})/groupby((TestSuiteId, TestSuiteTitle, DateSK), aggregate(Passed with sum as Passed, Failed with sum as Failed, Blocked with sum as Blocked, NotExecuted with sum as NotExecuted, TotalCount with sum as TotalCount))&$orderby=DateSK desc";
             var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestPointHistorySnapshot?{oDataQuery}";
-
-            Console.WriteLine($"[TestPlanService] Analytics URL: {analyticsUrl}");
 
             var response = await _httpClient.GetAsync(analyticsUrl);
             var responseContent = await response.Content.ReadAsStringAsync();
 
-            Console.WriteLine($"[TestPlanService] Analytics response status: {response.StatusCode}");
-            Console.WriteLine($"[TestPlanService] Response preview: {responseContent.Substring(0, Math.Min(500, responseContent.Length))}...");
-
             if (!response.IsSuccessStatusCode)
             {
-                Console.WriteLine($"[TestPlanService] Analytics API error: {responseContent}");
-                _logger.LogWarning("Analytics API returned {StatusCode}: {Content}", response.StatusCode, responseContent);
-
-                // Fallback to REST API
-                Console.WriteLine("[TestPlanService] Falling back to REST API...");
+                _logger.LogWarning("Analytics API returned {StatusCode} for plan {PlanId}, falling back to REST API", response.StatusCode, planId);
                 return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
             }
 
@@ -312,11 +242,8 @@ public class TestPlanService : ITestPlanService
 
             if (analyticsResult?.Value == null || analyticsResult.Value.Count == 0)
             {
-                Console.WriteLine("[TestPlanService] No data from Analytics API, trying REST API...");
                 return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
             }
-
-            Console.WriteLine($"[TestPlanService] Got {analyticsResult.Value.Count} rows from Analytics API");
 
             var planSummary = new TestPlanSummary
             {
@@ -327,13 +254,9 @@ public class TestPlanService : ITestPlanService
 
             // Get the latest date's data for each suite
             var latestDateSK = analyticsResult.Value.Max(r => r.DateSK);
-            Console.WriteLine($"[TestPlanService] Latest DateSK: {latestDateSK}");
-
             var latestData = analyticsResult.Value
                 .Where(r => r.DateSK == latestDateSK)
                 .ToList();
-
-            Console.WriteLine($"[TestPlanService] Found {latestData.Count} suites with latest data");
 
             foreach (var row in latestData)
             {
@@ -371,7 +294,6 @@ public class TestPlanService : ITestPlanService
                     : 0;
 
                 planSummary.Suites.Add(suiteSummary);
-                Console.WriteLine($"[TestPlanService]   Suite '{suiteName}': {suiteSummary.TotalTests} tests, {suiteSummary.PassedCount} passed, {suiteSummary.FailedCount} failed");
             }
 
             // Calculate plan totals
@@ -384,16 +306,11 @@ public class TestPlanService : ITestPlanService
                 ? Math.Round((double)planSummary.PassedCount / planSummary.TotalTests * 100, 1)
                 : 0;
 
-            Console.WriteLine($"[TestPlanService] Plan total: {planSummary.TotalTests} tests, {planSummary.PassRate}% pass rate");
-
             return planSummary;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TestPlanService] Analytics error: {ex.Message}");
             _logger.LogError(ex, "Failed to get test plan progress from Analytics API for plan {PlanId}", planId);
-
-            // Fallback to REST API
             return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
         }
     }
@@ -407,8 +324,6 @@ public class TestPlanService : ITestPlanService
     {
         try
         {
-            Console.WriteLine($"[TestPlanService] Using REST API fallback for plan {planId}...");
-
             var planSummary = new TestPlanSummary
             {
                 Id = planId,
@@ -416,9 +331,7 @@ public class TestPlanService : ITestPlanService
                 Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}"
             };
 
-            // Get all suites for the plan
             var allSuites = await GetTestSuitesAsync(project, planId);
-            Console.WriteLine($"[TestPlanService] REST API found {allSuites.Count} suites");
 
             List<AzDoTestSuite> suitesToProcess;
 
@@ -458,7 +371,6 @@ public class TestPlanService : ITestPlanService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TestPlanService] REST API error: {ex.Message}");
             _logger.LogError(ex, "Failed to get test plan progress from REST API for plan {PlanId}", planId);
             return null;
         }
@@ -478,7 +390,7 @@ public class TestPlanService : ITestPlanService
 
     private async Task<List<AzDoTestPlan>> GetAllTestPlansAsync(string project)
     {
-        // Try Analytics API first (no 200 limit, more reliable)
+        // Try Analytics API first (no 200 limit)
         var analyticsPlans = await GetTestPlansFromAnalyticsAsync(project);
         if (analyticsPlans.Count > 0)
         {
@@ -493,20 +405,15 @@ public class TestPlanService : ITestPlanService
     {
         try
         {
-            // Query TestSuites entity to get distinct TestPlanId and TestPlanTitle
             var oDataQuery = "$apply=groupby((TestPlanId, TestPlanTitle))";
             var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestSuites?{oDataQuery}";
-
-            Console.WriteLine($"[TestPlanService] Fetching test plans from Analytics API: {analyticsUrl}");
 
             var response = await _httpClient.GetAsync(analyticsUrl);
             var content = await response.Content.ReadAsStringAsync();
 
-            Console.WriteLine($"[TestPlanService] Analytics API response: {response.StatusCode}");
-
             if (!response.IsSuccessStatusCode)
             {
-                Console.WriteLine($"[TestPlanService] Analytics API error: {content}");
+                _logger.LogWarning("Analytics API error fetching test plans: {StatusCode}", response.StatusCode);
                 return new List<AzDoTestPlan>();
             }
 
@@ -515,27 +422,15 @@ public class TestPlanService : ITestPlanService
                 PropertyNameCaseInsensitive = true
             });
 
-            var plans = result?.Value?
+            return result?.Value?
                 .Where(p => p.TestPlanId > 0)
                 .Select(p => new AzDoTestPlan { Id = p.TestPlanId, Name = p.TestPlanTitle })
                 .DistinctBy(p => p.Id)
                 .OrderBy(p => p.Name)
                 .ToList() ?? new List<AzDoTestPlan>();
-
-            Console.WriteLine($"[TestPlanService] Analytics API found {plans.Count} test plans");
-
-            // Log plans containing "2024" or "Regression" for debugging
-            var relevantPlans = plans.Where(p =>
-                p.Name?.Contains("2024", StringComparison.OrdinalIgnoreCase) == true ||
-                p.Name?.Contains("Regression", StringComparison.OrdinalIgnoreCase) == true)
-                .ToList();
-            Console.WriteLine($"[TestPlanService] Plans with '2024' or 'Regression': {string.Join(", ", relevantPlans.Select(p => $"{p.Id}:{p.Name}"))}");
-
-            return plans;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TestPlanService] Analytics API error: {ex.Message}");
             _logger.LogError(ex, "Failed to fetch test plans from Analytics API");
             return new List<AzDoTestPlan>();
         }
@@ -556,16 +451,11 @@ public class TestPlanService : ITestPlanService
                     url += $"&continuationToken={continuationToken}";
                 }
 
-                Console.WriteLine($"[TestPlanService] Fetching test plans from REST API: {url}");
-
                 var response = await _httpClient.GetAsync(url);
                 var content = await response.Content.ReadAsStringAsync();
 
-                Console.WriteLine($"[TestPlanService] REST API response: {response.StatusCode}");
-
                 if (!response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine($"[TestPlanService] REST API error: {content}");
                     break;
                 }
 
@@ -576,24 +466,19 @@ public class TestPlanService : ITestPlanService
 
                 var plans = result?.Value ?? new List<AzDoTestPlan>();
                 allPlans.AddRange(plans);
-                Console.WriteLine($"[TestPlanService] Fetched {plans.Count} plans (total so far: {allPlans.Count})");
 
-                // Check for continuation token in response headers
                 continuationToken = null;
                 if (response.Headers.TryGetValues("x-ms-continuationtoken", out var tokens))
                 {
                     continuationToken = tokens.FirstOrDefault();
-                    Console.WriteLine($"[TestPlanService] Continuation token found, fetching more...");
                 }
 
             } while (!string.IsNullOrEmpty(continuationToken));
 
-            Console.WriteLine($"[TestPlanService] REST API total plans found: {allPlans.Count}");
             return allPlans;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TestPlanService] REST API error: {ex.Message}");
             _logger.LogError(ex, "Failed to fetch test plans from REST API");
             return allPlans;
         }
@@ -677,14 +562,6 @@ public class TestPlanService : ITestPlanService
     {
         public int TestPlanId { get; set; }
         public string? TestPlanTitle { get; set; }
-    }
-
-    private class TestPointAnalytics
-    {
-        public int TestSuiteId { get; set; }
-        public string? TestSuiteTitle { get; set; }
-        public string? Outcome { get; set; }
-        public int Count { get; set; }
     }
 
     private class TestPointHistorySnapshotResult
