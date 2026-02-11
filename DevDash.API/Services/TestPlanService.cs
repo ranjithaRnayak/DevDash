@@ -222,8 +222,8 @@ public class TestPlanService : ITestPlanService
     {
         try
         {
-            // Query TestPointHistorySnapshot grouped by TestSuite to get per-suite counts
-            var oDataQuery = $"$apply=filter(TestPlanId eq {planId})/groupby((TestSuiteId, TestSuiteTitle, DateSK), aggregate(Passed with sum as Passed, Failed with sum as Failed, Blocked with sum as Blocked, NotExecuted with sum as NotExecuted, TotalCount with sum as TotalCount))&$orderby=DateSK desc";
+            // Query TestPointHistorySnapshot for plan-level totals (TestSuiteTitle not available in all projects)
+            var oDataQuery = $"$apply=filter(TestPlanId eq {planId})/groupby((DateSK), aggregate(Passed with sum as Passed, Failed with sum as Failed, Blocked with sum as Blocked, NotExecuted with sum as NotExecuted, TotalCount with sum as TotalCount))&$orderby=DateSK desc&$top=1";
             var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestPointHistorySnapshot?{oDataQuery}";
 
             var response = await _httpClient.GetAsync(analyticsUrl);
@@ -245,66 +245,27 @@ public class TestPlanService : ITestPlanService
                 return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
             }
 
+            // Get the latest snapshot
+            var latestData = analyticsResult.Value.First();
+
             var planSummary = new TestPlanSummary
             {
                 Id = planId,
                 Name = planName,
-                Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}"
+                Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}",
+                TotalTests = latestData.TotalCount,
+                PassedCount = latestData.Passed,
+                FailedCount = latestData.Failed,
+                BlockedCount = latestData.Blocked,
+                NotRunCount = latestData.NotExecuted
             };
 
-            // Get the latest date's data for each suite
-            var latestDateSK = analyticsResult.Value.Max(r => r.DateSK);
-            var latestData = analyticsResult.Value
-                .Where(r => r.DateSK == latestDateSK)
-                .ToList();
-
-            foreach (var row in latestData)
-            {
-                var suiteName = row.TestSuiteTitle ?? $"Suite {row.TestSuiteId}";
-                var suiteId = row.TestSuiteId ?? 0;
-
-                // Check if suite matches filters (if any)
-                if (suiteFilters != null && suiteFilters.Count > 0)
-                {
-                    var matchesFilter = suiteFilters.Any(f =>
-                        suiteName.Contains(f, StringComparison.OrdinalIgnoreCase) ||
-                        f.Contains(suiteName, StringComparison.OrdinalIgnoreCase));
-
-                    if (!matchesFilter)
-                    {
-                        continue;
-                    }
-                }
-
-                var suiteSummary = new TestSuiteSummary
-                {
-                    Id = suiteId,
-                    PlanId = planId,
-                    Name = suiteName,
-                    Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}&suiteId={suiteId}",
-                    TotalTests = row.TotalCount,
-                    PassedCount = row.Passed,
-                    FailedCount = row.Failed,
-                    BlockedCount = row.Blocked,
-                    NotRunCount = row.NotExecuted
-                };
-
-                suiteSummary.PassRate = suiteSummary.TotalTests > 0
-                    ? Math.Round((double)suiteSummary.PassedCount / suiteSummary.TotalTests * 100, 1)
-                    : 0;
-
-                planSummary.Suites.Add(suiteSummary);
-            }
-
-            // Calculate plan totals
-            planSummary.TotalTests = planSummary.Suites.Sum(s => s.TotalTests);
-            planSummary.PassedCount = planSummary.Suites.Sum(s => s.PassedCount);
-            planSummary.FailedCount = planSummary.Suites.Sum(s => s.FailedCount);
-            planSummary.BlockedCount = planSummary.Suites.Sum(s => s.BlockedCount);
-            planSummary.NotRunCount = planSummary.Suites.Sum(s => s.NotRunCount);
             planSummary.PassRate = planSummary.TotalTests > 0
                 ? Math.Round((double)planSummary.PassedCount / planSummary.TotalTests * 100, 1)
                 : 0;
+
+            // Get suite details from REST API for breakdown (suite names not available in Analytics for this project)
+            await AddSuiteDetailsFromRestApiAsync(planSummary, project, planId, suiteFilters, orgUrl);
 
             return planSummary;
         }
@@ -312,6 +273,46 @@ public class TestPlanService : ITestPlanService
         {
             _logger.LogError(ex, "Failed to get test plan progress from Analytics API for plan {PlanId}", planId);
             return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
+        }
+    }
+
+    private async Task AddSuiteDetailsFromRestApiAsync(
+        TestPlanSummary planSummary,
+        string project,
+        int planId,
+        List<string>? suiteFilters,
+        string orgUrl)
+    {
+        try
+        {
+            var allSuites = await GetTestSuitesAsync(project, planId);
+
+            List<AzDoTestSuite> suitesToProcess;
+            if (suiteFilters == null || suiteFilters.Count == 0)
+            {
+                suitesToProcess = allSuites;
+            }
+            else
+            {
+                suitesToProcess = allSuites.Where(s =>
+                    suiteFilters.Any(f =>
+                        (s.Name?.Contains(f, StringComparison.OrdinalIgnoreCase) == true) ||
+                        f.Contains(s.Name ?? "", StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+            }
+
+            foreach (var suite in suitesToProcess)
+            {
+                var suiteSummary = await GetSuiteProgressAsync(project, planId, suite.Id, suite.Name ?? "Unknown", orgUrl);
+                if (suiteSummary != null && suiteSummary.TotalTests > 0)
+                {
+                    planSummary.Suites.Add(suiteSummary);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get suite details for plan {PlanId}", planId);
         }
     }
 
