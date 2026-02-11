@@ -222,8 +222,8 @@ public class TestPlanService : ITestPlanService
     {
         try
         {
-            // Query TestPointHistorySnapshot for plan-level totals (TestSuiteTitle not available in all projects)
-            var oDataQuery = $"$apply=filter(TestPlanId eq {planId})/groupby((DateSK), aggregate(Passed with sum as Passed, Failed with sum as Failed, Blocked with sum as Blocked, NotExecuted with sum as NotExecuted, TotalCount with sum as TotalCount))&$orderby=DateSK desc&$top=1";
+            // Query TestPointHistorySnapshot - filter by plan, get latest date, select needed fields
+            var oDataQuery = $"$filter=TestPlanId eq {planId}&$select=DateSK,TotalCount,Passed,Failed,Blocked,NotExecuted&$orderby=DateSK desc";
             var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestPointHistorySnapshot?{oDataQuery}";
 
             var response = await _httpClient.GetAsync(analyticsUrl);
@@ -245,26 +245,27 @@ public class TestPlanService : ITestPlanService
                 return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
             }
 
-            // Get the latest snapshot
-            var latestData = analyticsResult.Value.First();
+            // Get the latest DateSK and sum all values for that date
+            var latestDateSK = analyticsResult.Value.Max(r => r.DateSK);
+            var latestData = analyticsResult.Value.Where(r => r.DateSK == latestDateSK).ToList();
 
             var planSummary = new TestPlanSummary
             {
                 Id = planId,
                 Name = planName,
                 Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}",
-                TotalTests = latestData.TotalCount,
-                PassedCount = latestData.Passed,
-                FailedCount = latestData.Failed,
-                BlockedCount = latestData.Blocked,
-                NotRunCount = latestData.NotExecuted
+                TotalTests = latestData.Sum(r => r.TotalCount),
+                PassedCount = latestData.Sum(r => r.Passed),
+                FailedCount = latestData.Sum(r => r.Failed),
+                BlockedCount = latestData.Sum(r => r.Blocked),
+                NotRunCount = latestData.Sum(r => r.NotExecuted)
             };
 
             planSummary.PassRate = planSummary.TotalTests > 0
                 ? Math.Round((double)planSummary.PassedCount / planSummary.TotalTests * 100, 1)
                 : 0;
 
-            // Get suite details from REST API for breakdown (suite names not available in Analytics for this project)
+            // Get suite details from REST API for breakdown
             await AddSuiteDetailsFromRestApiAsync(planSummary, project, planId, suiteFilters, orgUrl);
 
             return planSummary;
