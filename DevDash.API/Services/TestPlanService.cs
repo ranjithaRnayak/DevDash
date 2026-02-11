@@ -69,24 +69,48 @@ public class TestPlanService : ITestPlanService
             var project = _configuration["AzureDevOps:Project"];
             var orgUrl = _configuration["AzureDevOps:OrganizationUrl"]?.TrimEnd('/');
             var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
-            var suitesConfig = _configuration.GetSection("TestPlans:Suites").Get<List<TestSuiteConfig>>() ?? new List<TestSuiteConfig>();
 
+            if (plansConfig.Count == 0)
+            {
+                _logger.LogWarning("No test plans configured in TestPlans:Plans");
+                return new TestPlanProgress();
+            }
+
+            var allPlans = await GetAllTestPlansAsync(project!);
             var progress = new TestPlanProgress();
 
             foreach (var planConfig in plansConfig)
             {
+                var matchingPlan = allPlans.FirstOrDefault(p =>
+                    p.Name?.Equals(planConfig.Name, StringComparison.OrdinalIgnoreCase) == true);
+
+                if (matchingPlan == null)
+                {
+                    _logger.LogWarning("Test plan '{PlanName}' not found in Azure DevOps", planConfig.Name);
+                    continue;
+                }
+
                 var planSummary = new TestPlanSummary
                 {
-                    Id = planConfig.Id,
-                    Name = planConfig.Name,
-                    Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planConfig.Id}"
+                    Id = matchingPlan.Id,
+                    Name = matchingPlan.Name ?? planConfig.Name,
+                    Url = $"{orgUrl}/{project}/_testPlans/execute?planId={matchingPlan.Id}"
                 };
 
-                var planSuites = suitesConfig.Where(s => s.PlanId == planConfig.Id).ToList();
+                var allSuites = await GetTestSuitesAsync(project!, matchingPlan.Id);
 
-                foreach (var suiteConfig in planSuites)
+                foreach (var suiteName in planConfig.Suites)
                 {
-                    var suiteSummary = await GetSuiteProgressAsync(project!, planConfig.Id, suiteConfig.SuiteId, suiteConfig.Name, orgUrl!);
+                    var matchingSuite = allSuites.FirstOrDefault(s =>
+                        s.Name?.Equals(suiteName, StringComparison.OrdinalIgnoreCase) == true);
+
+                    if (matchingSuite == null)
+                    {
+                        _logger.LogWarning("Test suite '{SuiteName}' not found in plan '{PlanName}'", suiteName, planConfig.Name);
+                        continue;
+                    }
+
+                    var suiteSummary = await GetSuiteProgressAsync(project!, matchingPlan.Id, matchingSuite.Id, matchingSuite.Name ?? suiteName, orgUrl!);
                     if (suiteSummary != null)
                     {
                         planSummary.Suites.Add(suiteSummary);
@@ -125,12 +149,62 @@ public class TestPlanService : ITestPlanService
         }
     }
 
+    private async Task<List<AzDoTestPlan>> GetAllTestPlansAsync(string project)
+    {
+        try
+        {
+            var url = $"{project}/_apis/testplan/plans?api-version=7.0";
+            _logger.LogInformation("Fetching test plans from: {Url}", url);
+
+            var response = await _httpClient.GetAsync(url);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch test plans: {StatusCode}", response.StatusCode);
+                return new List<AzDoTestPlan>();
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<AzDoTestPlansResponse>();
+            return result?.Value ?? new List<AzDoTestPlan>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch test plans");
+            return new List<AzDoTestPlan>();
+        }
+    }
+
+    private async Task<List<AzDoTestSuite>> GetTestSuitesAsync(string project, int planId)
+    {
+        try
+        {
+            var url = $"{project}/_apis/testplan/Plans/{planId}/suites?api-version=7.0";
+            _logger.LogInformation("Fetching test suites for plan {PlanId} from: {Url}", planId, url);
+
+            var response = await _httpClient.GetAsync(url);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch test suites for plan {PlanId}: {StatusCode}", planId, response.StatusCode);
+                return new List<AzDoTestSuite>();
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<AzDoTestSuitesResponse>();
+            return result?.Value ?? new List<AzDoTestSuite>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch test suites for plan {PlanId}", planId);
+            return new List<AzDoTestSuite>();
+        }
+    }
+
     private async Task<TestSuiteSummary?> GetSuiteProgressAsync(string project, int planId, int suiteId, string suiteName, string orgUrl)
     {
         try
         {
             var url = $"{project}/_apis/testplan/Plans/{planId}/Suites/{suiteId}/TestPoint?api-version=7.0";
-            _logger.LogInformation("Fetching test points from: {Url}", url);
+            _logger.LogInformation("Fetching test points for suite '{SuiteName}' from: {Url}", suiteName, url);
 
             var response = await _httpClient.GetAsync(url);
 
@@ -173,20 +247,37 @@ public class TestPlanService : ITestPlanService
 
     private class TestPlanConfig
     {
-        public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
-    }
-
-    private class TestSuiteConfig
-    {
-        public int PlanId { get; set; }
-        public int SuiteId { get; set; }
-        public string Name { get; set; } = string.Empty;
+        public List<string> Suites { get; set; } = new();
     }
 
     #endregion
 
     #region Azure DevOps API Response Models
+
+    private class AzDoTestPlansResponse
+    {
+        public List<AzDoTestPlan>? Value { get; set; }
+        public int Count { get; set; }
+    }
+
+    private class AzDoTestPlan
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+    }
+
+    private class AzDoTestSuitesResponse
+    {
+        public List<AzDoTestSuite>? Value { get; set; }
+        public int Count { get; set; }
+    }
+
+    private class AzDoTestSuite
+    {
+        public int Id { get; set; }
+        public string? Name { get; set; }
+    }
 
     private class AzDoTestPointsResponse
     {
