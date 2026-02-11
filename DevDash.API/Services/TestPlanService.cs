@@ -244,15 +244,21 @@ public class TestPlanService : ITestPlanService
             // Get ALL test points for the entire plan (includes all child suites)
             var allTestPoints = await GetAllTestPointsForPlanAsync(project, planId);
 
-            // Calculate plan totals
+            // Calculate plan totals - include all executed outcomes (passed, failed, blocked, inProgress, etc.)
             planSummary.TotalTests = allTestPoints.Count;
             planSummary.PassedCount = allTestPoints.Count(tp => tp.Results?.Outcome?.Equals("passed", StringComparison.OrdinalIgnoreCase) == true);
             planSummary.FailedCount = allTestPoints.Count(tp => tp.Results?.Outcome?.Equals("failed", StringComparison.OrdinalIgnoreCase) == true);
             planSummary.BlockedCount = allTestPoints.Count(tp => tp.Results?.Outcome?.Equals("blocked", StringComparison.OrdinalIgnoreCase) == true);
-            planSummary.NotRunCount = planSummary.TotalTests - planSummary.PassedCount - planSummary.FailedCount - planSummary.BlockedCount;
+
+            // Count tests with other executed outcomes (inProgress, paused, error, etc.)
+            var otherExecutedCount = allTestPoints.Count(tp => IsOtherExecutedOutcome(tp.Results?.Outcome));
+
+            // NotRun = tests with no outcome or "none" outcome
+            planSummary.NotRunCount = allTestPoints.Count(tp => IsNotRunOutcome(tp.Results?.Outcome));
 
             // Calculate pass rate as Passed / Executed (Azure DevOps style)
-            var executedCount = planSummary.PassedCount + planSummary.FailedCount + planSummary.BlockedCount;
+            // Executed includes all outcomes except "none"/null
+            var executedCount = planSummary.PassedCount + planSummary.FailedCount + planSummary.BlockedCount + otherExecutedCount;
             planSummary.PassRate = executedCount > 0
                 ? Math.Round((double)planSummary.PassedCount / executedCount * 100, 1)
                 : 0;
@@ -270,7 +276,9 @@ public class TestPlanService : ITestPlanService
                 var passed = group.Count(tp => tp.Results?.Outcome?.Equals("passed", StringComparison.OrdinalIgnoreCase) == true);
                 var failed = group.Count(tp => tp.Results?.Outcome?.Equals("failed", StringComparison.OrdinalIgnoreCase) == true);
                 var blocked = group.Count(tp => tp.Results?.Outcome?.Equals("blocked", StringComparison.OrdinalIgnoreCase) == true);
-                var executed = passed + failed + blocked;
+                var otherExecuted = group.Count(tp => IsOtherExecutedOutcome(tp.Results?.Outcome));
+                var notRun = group.Count(tp => IsNotRunOutcome(tp.Results?.Outcome));
+                var executed = passed + failed + blocked + otherExecuted;
 
                 var suiteSummary = new TestSuiteSummary
                 {
@@ -282,7 +290,7 @@ public class TestPlanService : ITestPlanService
                     PassedCount = passed,
                     FailedCount = failed,
                     BlockedCount = blocked,
-                    NotRunCount = group.Count() - executed,
+                    NotRunCount = notRun,
                     PassRate = executed > 0 ? Math.Round((double)passed / executed * 100, 1) : 0
                 };
 
@@ -301,6 +309,29 @@ public class TestPlanService : ITestPlanService
         }
     }
 
+    /// <summary>
+    /// Check if the outcome represents a test that was executed but is not passed/failed/blocked
+    /// </summary>
+    private static bool IsOtherExecutedOutcome(string? outcome)
+    {
+        if (string.IsNullOrEmpty(outcome)) return false;
+
+        // These outcomes indicate the test was executed but has a non-standard result
+        var executedOutcomes = new[] { "inProgress", "paused", "error", "warning", "timeout", "aborted", "inconclusive" };
+        return executedOutcomes.Any(o => outcome.Equals(o, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Check if the outcome represents a test that has not been run
+    /// </summary>
+    private static bool IsNotRunOutcome(string? outcome)
+    {
+        // Null, empty, "none", "unspecified", or "notApplicable" means not run
+        if (string.IsNullOrEmpty(outcome)) return true;
+        var notRunOutcomes = new[] { "none", "unspecified", "notApplicable", "notExecuted" };
+        return notRunOutcomes.Any(o => outcome.Equals(o, StringComparison.OrdinalIgnoreCase));
+    }
+
     private async Task<List<AzDoTestPoint>> GetAllTestPointsForPlanAsync(string project, int planId)
     {
         // Deduplicate by TestCase.Id - same test case can appear in multiple suites
@@ -312,10 +343,14 @@ public class TestPlanService : ITestPlanService
             var suites = await GetAllSuitesForPlanAsync(project, planId);
             _logger.LogInformation("Found {SuiteCount} suites for plan {PlanId}", suites.Count, planId);
 
-            // Get test points from each suite, deduplicating by test case ID
-            foreach (var suite in suites)
+            // Get test points from all suites IN PARALLEL for better performance
+            var suiteTasks = suites.Select(suite =>
+                GetTestPointsForSuiteAsync(project, planId, suite.Id, suite.Name));
+            var allSuiteResults = await Task.WhenAll(suiteTasks);
+
+            // Combine and deduplicate by test case ID
+            foreach (var suitePoints in allSuiteResults)
             {
-                var suitePoints = await GetTestPointsForSuiteAsync(project, planId, suite.Id, suite.Name);
                 foreach (var point in suitePoints)
                 {
                     var testCaseId = point.TestCase?.Id ?? point.Id;
