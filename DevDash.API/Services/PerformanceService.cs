@@ -1,8 +1,10 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Http;
 
 namespace DevDash.API.Services;
 
@@ -32,6 +34,7 @@ public class PerformanceService : IPerformanceService
     private readonly IConfiguration _configuration;
     private readonly ICacheService _cacheService;
     private readonly ILogger<PerformanceService> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
     // Cached authenticated user info
     private AzDoUserInfo? _cachedUser;
@@ -40,7 +43,8 @@ public class PerformanceService : IPerformanceService
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ICacheService cacheService,
-        ILogger<PerformanceService> logger)
+        ILogger<PerformanceService> logger,
+        IHttpContextAccessor httpContextAccessor)
     {
         _azDoClient = httpClientFactory.CreateClient("AzureDevOps");
         _gitHubClient = httpClientFactory.CreateClient("GitHub");
@@ -48,6 +52,7 @@ public class PerformanceService : IPerformanceService
         _configuration = configuration;
         _cacheService = cacheService;
         _logger = logger;
+        _httpContextAccessor = httpContextAccessor;
 
         ConfigureClients();
     }
@@ -86,15 +91,24 @@ public class PerformanceService : IPerformanceService
     }
 
     /// <summary>
-    /// Get the authenticated Azure DevOps user by calling /_apis/connectionData
-    /// Returns a fallback user if API fails (PAT mode without valid Azure DevOps config)
+    /// Get the authenticated user based on authentication mode:
+    /// - PAT mode: Get user from Azure DevOps API using PAT token
+    /// - Entra ID mode: Get user from HTTP context claims
     /// </summary>
     public async Task<AzDoUserInfo> GetAuthenticatedAzDoUserAsync()
     {
-        // Check cache first
-        var cacheKey = "azdo:authenticated-user";
+        // Check if we're in PAT mode or Entra ID mode
+        var usePATToken = _configuration.GetValue<bool>("FeatureFlags:UsePATToken", false);
+        var authType = GetAuthTypeFromClaims();
+
+        _logger.LogInformation("Auth mode - UsePATToken: {UsePAT}, AuthType from claims: {AuthType}", usePATToken, authType);
+
+        // Build cache key based on auth context
+        var userId = GetUserIdFromClaims();
+        var cacheKey = $"azdo:authenticated-user:{userId ?? "default"}";
+
         var cached = await _cacheService.GetAsync<AzDoUserInfo>(cacheKey);
-        if (cached != null)
+        if (cached != null && cached.Id != "pat-user") // Don't return cached fallback
         {
             _logger.LogInformation("Returning cached user: {UserId}, {Email}", cached.Id, cached.Email);
             return cached;
@@ -102,60 +116,289 @@ public class PerformanceService : IPerformanceService
 
         try
         {
-            // Check if Azure DevOps is configured
-            var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
-            var pat = _configuration["AzureDevOps:PAT"];
+            AzDoUserInfo? userInfo = null;
 
-            if (string.IsNullOrEmpty(orgUrl) || string.IsNullOrEmpty(pat))
+            // If using Entra ID (not PAT mode), try to get user from claims first
+            if (!usePATToken && authType != "PAT")
             {
-                _logger.LogWarning("Azure DevOps not configured - returning fallback user");
-                return GetFallbackUser();
+                userInfo = await GetUserFromEntraIdClaimsAsync();
+                if (userInfo != null && userInfo.Id != "pat-user")
+                {
+                    _logger.LogInformation("Resolved user from Entra ID claims: {UserId}, {DisplayName}, {Email}",
+                        userInfo.Id, userInfo.DisplayName, userInfo.Email);
+                }
             }
 
-            _logger.LogInformation("Fetching authenticated user from: {BaseAddress}_apis/connectionData", _azDoClient.BaseAddress);
+            // If no user from claims or in PAT mode, get from Azure DevOps API
+            if (userInfo == null || userInfo.Id == "pat-user")
+            {
+                userInfo = await GetUserFromAzureDevOpsApiAsync();
+            }
+
+            if (userInfo != null && userInfo.Id != "pat-user")
+            {
+                // Cache for 30 minutes
+                await _cacheService.SetAsync(cacheKey, userInfo, TimeSpan.FromMinutes(30));
+                _cachedUser = userInfo;
+                return userInfo;
+            }
+
+            _logger.LogWarning("Could not resolve user from any source - returning fallback");
+            return GetFallbackUser();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get authenticated user");
+            return GetFallbackUser();
+        }
+    }
+
+    /// <summary>
+    /// Get user info from Entra ID claims (for Entra ID auth mode)
+    /// </summary>
+    private Task<AzDoUserInfo?> GetUserFromEntraIdClaimsAsync()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user?.Identity?.IsAuthenticated != true)
+        {
+            _logger.LogWarning("User is not authenticated via HTTP context");
+            return Task.FromResult<AzDoUserInfo?>(null);
+        }
+
+        // Extract claims from Entra ID token
+        var objectId = user.FindFirst("oid")?.Value // Azure AD Object ID
+                       ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var email = user.FindFirst(ClaimTypes.Email)?.Value
+                    ?? user.FindFirst("email")?.Value
+                    ?? user.FindFirst("preferred_username")?.Value
+                    ?? user.FindFirst(ClaimTypes.Upn)?.Value;
+        var name = user.FindFirst(ClaimTypes.Name)?.Value
+                   ?? user.FindFirst("name")?.Value;
+
+        _logger.LogInformation("Entra ID claims - ObjectId: {ObjectId}, Email: {Email}, Name: {Name}",
+            objectId, email, name);
+
+        if (string.IsNullOrEmpty(objectId) && string.IsNullOrEmpty(email))
+        {
+            return Task.FromResult<AzDoUserInfo?>(null);
+        }
+
+        var userInfo = new AzDoUserInfo
+        {
+            Id = objectId ?? email ?? "",
+            DisplayName = name ?? email ?? "",
+            Email = email ?? "",
+            UniqueName = email ?? ""
+        };
+
+        return Task.FromResult<AzDoUserInfo?>(userInfo);
+    }
+
+    /// <summary>
+    /// Get user info from Azure DevOps API using PAT token
+    /// </summary>
+    private async Task<AzDoUserInfo?> GetUserFromAzureDevOpsApiAsync()
+    {
+        var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
+        var pat = _configuration["AzureDevOps:PAT"];
+
+        if (string.IsNullOrEmpty(orgUrl) || string.IsNullOrEmpty(pat))
+        {
+            _logger.LogWarning("Azure DevOps not configured - cannot resolve user");
+            return null;
+        }
+
+        // Try connectionData API first
+        var userInfo = await TryGetUserFromConnectionDataAsync();
+        if (userInfo != null)
+        {
+            return userInfo;
+        }
+
+        // Try profile API as fallback
+        userInfo = await TryGetUserFromProfileApiAsync();
+        return userInfo;
+    }
+
+    /// <summary>
+    /// Try to get user from Azure DevOps connectionData API
+    /// </summary>
+    private async Task<AzDoUserInfo?> TryGetUserFromConnectionDataAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Fetching user from connectionData API: {BaseAddress}_apis/connectionData", _azDoClient.BaseAddress);
             var response = await _azDoClient.GetAsync("_apis/connectionData?api-version=7.0");
 
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("ConnectionData API returned {StatusCode}", response.StatusCode);
-                return GetFallbackUser();
+                return null;
             }
 
             var content = await response.Content.ReadAsStringAsync();
-            _logger.LogInformation("ConnectionData response (first 500 chars): {Content}",
-                content.Length > 500 ? content.Substring(0, 500) : content);
+            _logger.LogDebug("ConnectionData response: {Content}",
+                content.Length > 1000 ? content.Substring(0, 1000) : content);
 
-            var data = System.Text.Json.JsonSerializer.Deserialize<ConnectionDataResponse>(content,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var data = JsonSerializer.Deserialize<ConnectionDataResponse>(content,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (data?.AuthenticatedUser == null)
             {
-                _logger.LogWarning("Could not resolve authenticated user from Azure DevOps - returning fallback");
-                return GetFallbackUser();
+                _logger.LogWarning("No authenticated user in connectionData response");
+                return null;
             }
+
+            // Extract email from various possible locations in the response
+            var email = ExtractEmailFromConnectionData(data.AuthenticatedUser);
 
             var userInfo = new AzDoUserInfo
             {
                 Id = data.AuthenticatedUser.Id,
-                DisplayName = data.AuthenticatedUser.ProviderDisplayName ?? data.AuthenticatedUser.DisplayName ?? "",
-                Email = data.AuthenticatedUser.Properties?.Account?.FirstOrDefault() ?? data.AuthenticatedUser.UniqueName ?? "",
-                UniqueName = data.AuthenticatedUser.UniqueName ?? ""
+                DisplayName = data.AuthenticatedUser.ProviderDisplayName
+                              ?? data.AuthenticatedUser.DisplayName
+                              ?? "",
+                Email = email,
+                UniqueName = data.AuthenticatedUser.UniqueName ?? email
             };
 
-            _logger.LogInformation("Resolved authenticated user: {UserId}, {DisplayName}, {Email}",
+            _logger.LogInformation("Resolved user from connectionData: {UserId}, {DisplayName}, {Email}",
                 userInfo.Id, userInfo.DisplayName, userInfo.Email);
-
-            // Cache for 30 minutes
-            await _cacheService.SetAsync(cacheKey, userInfo, TimeSpan.FromMinutes(30));
-            _cachedUser = userInfo;
 
             return userInfo;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get authenticated Azure DevOps user - returning fallback");
-            return GetFallbackUser();
+            _logger.LogError(ex, "Error fetching user from connectionData API");
+            return null;
         }
+    }
+
+    /// <summary>
+    /// Extract email from various locations in connection data response
+    /// </summary>
+    private string ExtractEmailFromConnectionData(AuthenticatedUserInfo user)
+    {
+        // Try Properties.Account first (array of emails)
+        if (user.Properties?.Account != null && user.Properties.Account.Count > 0)
+        {
+            var email = user.Properties.Account.FirstOrDefault();
+            if (!string.IsNullOrEmpty(email))
+                return email;
+        }
+
+        // Try UniqueName (often contains email)
+        if (!string.IsNullOrEmpty(user.UniqueName))
+        {
+            return user.UniqueName;
+        }
+
+        // Try CustomDisplayName
+        if (!string.IsNullOrEmpty(user.CustomDisplayName))
+        {
+            return user.CustomDisplayName;
+        }
+
+        return "";
+    }
+
+    /// <summary>
+    /// Try to get user from Azure DevOps profile API
+    /// </summary>
+    private async Task<AzDoUserInfo?> TryGetUserFromProfileApiAsync()
+    {
+        try
+        {
+            // Profile API requires vssps.dev.azure.com endpoint
+            var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
+            if (string.IsNullOrEmpty(orgUrl))
+                return null;
+
+            // Extract organization name from URL
+            var uri = new Uri(orgUrl);
+            string? orgName = null;
+
+            if (uri.Host.Contains("dev.azure.com"))
+            {
+                orgName = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            }
+            else if (uri.Host.Contains(".visualstudio.com"))
+            {
+                orgName = uri.Host.Split('.').FirstOrDefault();
+            }
+
+            if (string.IsNullOrEmpty(orgName))
+            {
+                _logger.LogWarning("Could not extract organization name from URL");
+                return null;
+            }
+
+            // Create profile API client
+            var pat = _configuration["AzureDevOps:PAT"];
+            var profileUrl = $"https://vssps.dev.azure.com/{orgName}/_apis/profile/profiles/me?api-version=7.0";
+
+            using var profileClient = new HttpClient();
+            var credentials = Convert.ToBase64String(Encoding.ASCII.GetBytes($":{pat}"));
+            profileClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+
+            _logger.LogInformation("Fetching user from profile API: {Url}", profileUrl);
+            var response = await profileClient.GetAsync(profileUrl);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Profile API returned {StatusCode}", response.StatusCode);
+                return null;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            _logger.LogDebug("Profile API response: {Content}",
+                content.Length > 500 ? content.Substring(0, 500) : content);
+
+            var profile = JsonSerializer.Deserialize<ProfileResponse>(content,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (profile == null)
+            {
+                return null;
+            }
+
+            var userInfo = new AzDoUserInfo
+            {
+                Id = profile.Id ?? profile.PublicAlias ?? "",
+                DisplayName = profile.DisplayName ?? "",
+                Email = profile.EmailAddress ?? "",
+                UniqueName = profile.EmailAddress ?? ""
+            };
+
+            _logger.LogInformation("Resolved user from profile API: {UserId}, {DisplayName}, {Email}",
+                userInfo.Id, userInfo.DisplayName, userInfo.Email);
+
+            return userInfo;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching user from profile API");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get auth type from HTTP context claims
+    /// </summary>
+    private string GetAuthTypeFromClaims()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        return user?.FindFirst("auth_type")?.Value ?? "unknown";
+    }
+
+    /// <summary>
+    /// Get user ID from HTTP context claims for cache key
+    /// </summary>
+    private string? GetUserIdFromClaims()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        return user?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+               ?? user?.FindFirst("oid")?.Value;
     }
 
     private AzDoUserInfo GetFallbackUser()
@@ -821,6 +1064,7 @@ Scheduled via DevDash";
         public string Id { get; set; } = "";
         public string? DisplayName { get; set; }
         public string? ProviderDisplayName { get; set; }
+        public string? CustomDisplayName { get; set; }
         public string? UniqueName { get; set; }
         public AuthUserProperties? Properties { get; set; }
     }
@@ -828,6 +1072,14 @@ Scheduled via DevDash";
     private class AuthUserProperties
     {
         public List<string>? Account { get; set; }
+    }
+
+    private class ProfileResponse
+    {
+        public string? Id { get; set; }
+        public string? PublicAlias { get; set; }
+        public string? DisplayName { get; set; }
+        public string? EmailAddress { get; set; }
     }
 
     private class AzDoPRListResponse
