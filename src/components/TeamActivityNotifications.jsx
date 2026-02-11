@@ -35,7 +35,6 @@ function dismissActivity(id) {
 export default function TeamActivityNotifications() {
   const { addToast } = useToast();
   const seenActivitiesRef = useRef(new Set());
-  const initialFetchDoneRef = useRef(false);
 
   const fetchActivities = useCallback(async () => {
     try {
@@ -49,12 +48,10 @@ export default function TeamActivityNotifications() {
         if (seenActivitiesRef.current.has(activity.id)) continue;
         if (dismissed.has(activity.id)) continue;
 
-        seenActivitiesRef.current.add(activity.id);
+        const activityAge = Date.now() - new Date(activity.timestamp).getTime();
+        if (activityAge > INITIAL_LOAD_WINDOW) continue;
 
-        if (!initialFetchDoneRef.current) {
-          const activityAge = Date.now() - new Date(activity.timestamp).getTime();
-          if (activityAge > INITIAL_LOAD_WINDOW) continue;
-        }
+        seenActivitiesRef.current.add(activity.id);
 
         const typeLabels = {
           PRCreated: 'New PR',
@@ -72,8 +69,6 @@ export default function TeamActivityNotifications() {
           onDismiss: () => dismissActivity(activity.id),
         });
       }
-
-      initialFetchDoneRef.current = true;
     } catch (error) {
       console.error('Failed to fetch team activities:', error);
     }
