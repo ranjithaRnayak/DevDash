@@ -478,6 +478,71 @@ public class TestPlanService : ITestPlanService
 
     private async Task<List<AzDoTestPlan>> GetAllTestPlansAsync(string project)
     {
+        // Try Analytics API first (no 200 limit, more reliable)
+        var analyticsPlans = await GetTestPlansFromAnalyticsAsync(project);
+        if (analyticsPlans.Count > 0)
+        {
+            return analyticsPlans;
+        }
+
+        // Fallback to REST API with pagination
+        return await GetTestPlansFromRestApiAsync(project);
+    }
+
+    private async Task<List<AzDoTestPlan>> GetTestPlansFromAnalyticsAsync(string project)
+    {
+        try
+        {
+            // Query TestSuites entity to get distinct TestPlanId and TestPlanTitle
+            var oDataQuery = "$apply=groupby((TestPlanId, TestPlanTitle))";
+            var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestSuites?{oDataQuery}";
+
+            Console.WriteLine($"[TestPlanService] Fetching test plans from Analytics API: {analyticsUrl}");
+
+            var response = await _httpClient.GetAsync(analyticsUrl);
+            var content = await response.Content.ReadAsStringAsync();
+
+            Console.WriteLine($"[TestPlanService] Analytics API response: {response.StatusCode}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[TestPlanService] Analytics API error: {content}");
+                return new List<AzDoTestPlan>();
+            }
+
+            var result = JsonSerializer.Deserialize<ODataResponse<TestPlanFromAnalytics>>(content, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            var plans = result?.Value?
+                .Where(p => p.TestPlanId > 0)
+                .Select(p => new AzDoTestPlan { Id = p.TestPlanId, Name = p.TestPlanTitle })
+                .DistinctBy(p => p.Id)
+                .OrderBy(p => p.Name)
+                .ToList() ?? new List<AzDoTestPlan>();
+
+            Console.WriteLine($"[TestPlanService] Analytics API found {plans.Count} test plans");
+
+            // Log plans containing "2024" or "Regression" for debugging
+            var relevantPlans = plans.Where(p =>
+                p.Name?.Contains("2024", StringComparison.OrdinalIgnoreCase) == true ||
+                p.Name?.Contains("Regression", StringComparison.OrdinalIgnoreCase) == true)
+                .ToList();
+            Console.WriteLine($"[TestPlanService] Plans with '2024' or 'Regression': {string.Join(", ", relevantPlans.Select(p => $"{p.Id}:{p.Name}"))}");
+
+            return plans;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TestPlanService] Analytics API error: {ex.Message}");
+            _logger.LogError(ex, "Failed to fetch test plans from Analytics API");
+            return new List<AzDoTestPlan>();
+        }
+    }
+
+    private async Task<List<AzDoTestPlan>> GetTestPlansFromRestApiAsync(string project)
+    {
         var allPlans = new List<AzDoTestPlan>();
         string? continuationToken = null;
 
@@ -523,18 +588,13 @@ public class TestPlanService : ITestPlanService
 
             } while (!string.IsNullOrEmpty(continuationToken));
 
-            Console.WriteLine($"[TestPlanService] Total plans found: {allPlans.Count}");
-
-            // Log some plan names for debugging
-            var planNames = allPlans.Select(p => $"{p.Id}:{p.Name}").ToList();
-            Console.WriteLine($"[TestPlanService] Plan names: {string.Join(", ", planNames.Take(50))}...");
-
+            Console.WriteLine($"[TestPlanService] REST API total plans found: {allPlans.Count}");
             return allPlans;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[TestPlanService] Error fetching plans: {ex.Message}");
-            _logger.LogError(ex, "Failed to fetch test plans");
+            Console.WriteLine($"[TestPlanService] REST API error: {ex.Message}");
+            _logger.LogError(ex, "Failed to fetch test plans from REST API");
             return allPlans;
         }
     }
@@ -611,6 +671,12 @@ public class TestPlanService : ITestPlanService
 
         [JsonPropertyName("value")]
         public List<T>? Value { get; set; }
+    }
+
+    private class TestPlanFromAnalytics
+    {
+        public int TestPlanId { get; set; }
+        public string? TestPlanTitle { get; set; }
     }
 
     private class TestPointAnalytics
