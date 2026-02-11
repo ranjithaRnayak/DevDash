@@ -329,7 +329,7 @@ public class AzureDevOpsService : IDevOpsService
         {
             Id = pr.PullRequestId.ToString(),
             Number = pr.PullRequestId,
-            Title = pr.Title,
+            Title = pr.Title ?? "",
             Description = pr.Description ?? "",
             Status = pr.IsDraft ? PRStatus.Draft : MapPRStatus(pr.Status),
             SourceBranch = pr.SourceRefName?.Replace("refs/heads/", "") ?? "",
@@ -446,6 +446,8 @@ public class AzureDevOpsService : IDevOpsService
         public DateTime? FinishTime { get; set; }
         public AzDoDefinition? Definition { get; set; }
         public AzDoIdentity? RequestedBy { get; set; }
+
+        [JsonPropertyName("_links")]
         public AzDoLinks? Links { get; set; }
     }
 
@@ -457,8 +459,18 @@ public class AzureDevOpsService : IDevOpsService
         public string? ImageUrl { get; set; }
         public string? Id { get; set; }
     }
-    private class AzDoLinks { public AzDoLink? Web { get; set; } }
-    private class AzDoLink { public string? Href { get; set; } }
+
+    private class AzDoLinks
+    {
+        [JsonPropertyName("web")]
+        public AzDoLink? Web { get; set; }
+    }
+
+    private class AzDoLink
+    {
+        [JsonPropertyName("href")]
+        public string? Href { get; set; }
+    }
 
     private class AzDoReviewer
     {
