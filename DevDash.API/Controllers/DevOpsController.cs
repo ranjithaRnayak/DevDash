@@ -379,13 +379,35 @@ public class DevOpsController : ControllerBase
     }
 
     /// <summary>
+    /// Lists all available test plans from Azure DevOps
+    /// </summary>
+    [HttpGet("testplans/available")]
+    public async Task<ActionResult<List<AvailableTestPlan>>> GetAvailableTestPlans()
+    {
+        Console.WriteLine("[DevOpsController] GetAvailableTestPlans endpoint called");
+        _logger.LogInformation("GetAvailableTestPlans endpoint called");
+        try
+        {
+            var plans = await _testPlanService.GetAvailableTestPlansAsync();
+            Console.WriteLine($"[DevOpsController] Found {plans.Count} available test plans");
+            return Ok(plans);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DevOpsController] ERROR listing plans: {ex.Message}");
+            _logger.LogError(ex, "Failed to list available test plans");
+            return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Simple ping endpoint to verify code deployment - returns build timestamp
     /// </summary>
     [HttpGet("testplans/ping")]
     [AllowAnonymous]
     public ActionResult<object> PingTestPlans()
     {
-        var buildTime = "2026-02-11T17:00:00Z"; // Update this timestamp to verify deployment
+        var buildTime = "2026-02-11T17:55:00Z"; // Update this timestamp to verify deployment
         Console.WriteLine($"[DevOpsController] PING! Build time: {buildTime}");
         return Ok(new {
             message = "TestPlan endpoints are available",

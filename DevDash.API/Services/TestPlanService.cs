@@ -12,7 +12,17 @@ namespace DevDash.API.Services;
 public interface ITestPlanService
 {
     Task<TestPlanProgress> GetTestPlanProgressAsync(bool bypassCache = false);
+    Task<List<AvailableTestPlan>> GetAvailableTestPlansAsync();
     TestPlanDebugInfo GetDebugInfo();
+}
+
+/// <summary>
+/// Represents an available test plan from Azure DevOps
+/// </summary>
+public class AvailableTestPlan
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -454,39 +464,78 @@ public class TestPlanService : ITestPlanService
         }
     }
 
+    public async Task<List<AvailableTestPlan>> GetAvailableTestPlansAsync()
+    {
+        var project = _configuration["AzureDevOps:Project"];
+        if (string.IsNullOrEmpty(project))
+        {
+            return new List<AvailableTestPlan>();
+        }
+
+        var plans = await GetAllTestPlansAsync(project);
+        return plans.Select(p => new AvailableTestPlan { Id = p.Id, Name = p.Name ?? "" }).ToList();
+    }
+
     private async Task<List<AzDoTestPlan>> GetAllTestPlansAsync(string project)
     {
+        var allPlans = new List<AzDoTestPlan>();
+        string? continuationToken = null;
+
         try
         {
-            var url = $"{project}/_apis/testplan/plans?api-version=7.0";
-            Console.WriteLine($"[TestPlanService] Fetching test plans from REST API: {url}");
-
-            var response = await _httpClient.GetAsync(url);
-            var content = await response.Content.ReadAsStringAsync();
-
-            Console.WriteLine($"[TestPlanService] REST API response: {response.StatusCode}");
-
-            if (!response.IsSuccessStatusCode)
+            do
             {
-                Console.WriteLine($"[TestPlanService] REST API error: {content}");
-                return new List<AzDoTestPlan>();
-            }
+                var url = $"{project}/_apis/testplan/plans?api-version=7.0&$top=200";
+                if (!string.IsNullOrEmpty(continuationToken))
+                {
+                    url += $"&continuationToken={continuationToken}";
+                }
 
-            var result = JsonSerializer.Deserialize<AzDoTestPlansResponse>(content, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+                Console.WriteLine($"[TestPlanService] Fetching test plans from REST API: {url}");
 
-            var plans = result?.Value ?? new List<AzDoTestPlan>();
-            Console.WriteLine($"[TestPlanService] Found {plans.Count} plans: {string.Join(", ", plans.Select(p => $"{p.Id}:{p.Name}"))}");
+                var response = await _httpClient.GetAsync(url);
+                var content = await response.Content.ReadAsStringAsync();
 
-            return plans;
+                Console.WriteLine($"[TestPlanService] REST API response: {response.StatusCode}");
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[TestPlanService] REST API error: {content}");
+                    break;
+                }
+
+                var result = JsonSerializer.Deserialize<AzDoTestPlansResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                var plans = result?.Value ?? new List<AzDoTestPlan>();
+                allPlans.AddRange(plans);
+                Console.WriteLine($"[TestPlanService] Fetched {plans.Count} plans (total so far: {allPlans.Count})");
+
+                // Check for continuation token in response headers
+                continuationToken = null;
+                if (response.Headers.TryGetValues("x-ms-continuationtoken", out var tokens))
+                {
+                    continuationToken = tokens.FirstOrDefault();
+                    Console.WriteLine($"[TestPlanService] Continuation token found, fetching more...");
+                }
+
+            } while (!string.IsNullOrEmpty(continuationToken));
+
+            Console.WriteLine($"[TestPlanService] Total plans found: {allPlans.Count}");
+
+            // Log some plan names for debugging
+            var planNames = allPlans.Select(p => $"{p.Id}:{p.Name}").ToList();
+            Console.WriteLine($"[TestPlanService] Plan names: {string.Join(", ", planNames.Take(50))}...");
+
+            return allPlans;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[TestPlanService] Error fetching plans: {ex.Message}");
             _logger.LogError(ex, "Failed to fetch test plans");
-            return new List<AzDoTestPlan>();
+            return allPlans;
         }
     }
 
