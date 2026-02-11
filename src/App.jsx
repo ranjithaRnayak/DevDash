@@ -7,6 +7,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 import GitHubConnect from './components/GitHubConnect';
 import { isPATTokenMode } from './config/featureFlags';
 import { useEnvironmentToggle } from './hooks/useEnvironmentToggle';
+import { ToastProvider } from './components/Toast';
+import TeamActivityNotifications from './components/TeamActivityNotifications';
 
 /**
  * Shared environment toggle component for both auth modes
@@ -186,14 +188,22 @@ const PATModeDashboard = () => {
  */
 const App = () => {
     if (isPATTokenMode()) {
-        return <PATModeDashboard />;
+        return (
+            <ToastProvider>
+                <PATModeDashboard />
+                <TeamActivityNotifications />
+            </ToastProvider>
+        );
     }
 
     return (
         <AuthProvider>
-            <ProtectedRoute>
-                <AuthenticatedDashboardContent />
-            </ProtectedRoute>
+            <ToastProvider>
+                <ProtectedRoute>
+                    <AuthenticatedDashboardContent />
+                    <TeamActivityNotifications />
+                </ProtectedRoute>
+            </ToastProvider>
         </AuthProvider>
     );
 };

@@ -174,6 +174,20 @@ cp secrets.config.json.template secrets.config.json
 - Partial name matching works for hierarchical paths like `"Plan / Team / Suite"`
 - Test Plan Progress card only appears on the Test Dashboard
 
+### Team Activity Notifications (Frontend)
+
+| Setting | Description |
+|---------|-------------|
+| `VITE_NOTIFICATION_WINDOW_HOURS` | Hours of activity to show on initial page load (default: 8) |
+
+**Example values:**
+- `8` - Normal workday (8 hours)
+- `24` - Full day
+- `48` - After weekend
+- `72` - After long leave
+
+**Location:** `.env` file
+
 ---
 
 ## AI Provider Configuration
@@ -198,6 +212,7 @@ cp secrets.config.json.template secrets.config.json
 | **Dual Auth** | Supports both PAT token and Entra ID authentication modes |
 | **Team Resolution** | Automatically resolves user's team membership for sprint filtering |
 | **Test Plan Progress** | Test dashboard card showing test plan/suite pass rates with progress bars (Test environment only) |
+| **Team Activity Notifications** | Toast notifications for team PR and pipeline activity |
 
 ---
 

@@ -77,6 +77,8 @@ export const devOpsAPI = {
   getPRAlertsConfig: () => apiClient.get('/devops/pralerts/config'),
   getTeamMembers: () => apiClient.get('/devops/team/members'),
   getTestPlanProgress: () => apiClient.get('/devops/testplans/progress'),
+  getTeamActivities: (since = null) =>
+    apiClient.get(`/devops/team/activities${since ? `?since=${since}` : ''}`),
 };
 
 export const healthAPI = {

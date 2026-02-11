@@ -194,6 +194,12 @@ builder.Services.AddHttpClient<ITestPlanService, TestPlanService>(client =>
 });
 
 // ============================================
+// Team Activity Service (Team notifications)
+// ============================================
+
+builder.Services.AddScoped<ITeamActivityService, TeamActivityService>();
+
+// ============================================
 // Copilot Service (GitHub Copilot Chat)
 // ============================================
 

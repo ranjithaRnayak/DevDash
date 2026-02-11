@@ -317,6 +317,61 @@ User selects branch                ▼
 
 ---
 
+### 7. TestPlanProgress.jsx
+
+**Purpose**: Display Azure DevOps test plan execution progress (Test Dashboard only)
+
+```
+User View                    Frontend                      Backend
+─────────────────────────────────────────────────────────────────────
+                            TestPlanProgress.jsx
+                                   │
+                                   │ useEffect (on mount)
+                                   ▼
+                            devOpsAPI.getTestPlanProgress()
+                                   │
+                                   │ GET /api/devops/testplans/progress
+                                   ▼
+                            DevOpsController.GetTestPlanProgress()
+                                   │
+                                   ▼
+                            TestPlanService.GetTestPlanProgressAsync()
+                                   │
+                    ┌──────────────┼──────────────┐
+                    ▼              ▼              ▼
+            GetAllTestPlans   GetAllSuites   GetTestPoints
+            (Analytics API)   (REST API)     (Parallel requests)
+                    │              │              │
+                    └──────────────┼──────────────┘
+                                   ▼
+                            Aggregate results:
+                            - Deduplicate by TestCase.Id
+                            - Calculate pass rates
+                            - Group by suite
+                                   │
+                                   ▼
+                            Returns: TestPlanProgress
+                            (plans, suites, pass rates)
+```
+
+**Configuration Used**:
+- `TestPlans.Plans[].Name` - Test plan names to track
+- `TestPlans.Plans[].Suites` - Optional suite filters
+- `TestPlans.CacheDurationMinutes` - Cache duration (default: 5)
+
+**Outcome Classification**:
+| Category | Outcomes |
+|----------|----------|
+| Passed | passed |
+| Failed | failed |
+| Blocked | blocked |
+| Other Executed | notApplicable, inProgress, paused, error, warning, timeout, aborted, inconclusive |
+| Not Run | none, unspecified, notExecuted, null |
+
+**Pass Rate Calculation**: `Passed / (Passed + Failed + Blocked + OtherExecuted) * 100`
+
+---
+
 ## Authentication Flow
 
 ### AuthContext.jsx - How It Works
@@ -446,6 +501,7 @@ The dashboard supports separate configurations for Dev and Test:
 |-----------|----------|--------|-------------|
 | PipelineStatus | `/api/devops/builds` | GET | Recent build status |
 | PRAlerts | `/api/devops/pullrequests` | GET | Open pull requests |
+| TestPlanProgress | `/api/devops/testplans/progress` | GET | Test plan execution progress |
 | PerformanceCard | `/api/performance/dashboard` | GET | User metrics |
 | PerformanceCard | `/api/performance/draft-prs` | GET | User's draft PRs |
 | PerformanceCard | `/api/performance/story-points` | GET | Sprint story points |
@@ -538,6 +594,7 @@ DevDash/
 │   ├── Services/
 │   │   ├── DevOpsService.cs
 │   │   ├── PerformanceService.cs
+│   │   ├── TestPlanService.cs       - Test plan progress (parallel API calls)
 │   │   ├── AIServiceRouter.cs
 │   │   ├── AzureOpenAIService.cs
 │   │   ├── CopilotService.cs

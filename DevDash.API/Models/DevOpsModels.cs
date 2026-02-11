@@ -267,3 +267,37 @@ public class TestPlanConfig
     public string Name { get; set; } = string.Empty;
     public List<string> Suites { get; set; } = new();
 }
+
+/// <summary>
+/// Team activity response for notifications
+/// </summary>
+public class TeamActivityResponse
+{
+    public string TeamName { get; set; } = string.Empty;
+    public List<TeamActivity> Activities { get; set; } = new();
+    public DateTime Since { get; set; }
+    public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Individual team activity item
+/// </summary>
+public class TeamActivity
+{
+    public string Id { get; set; } = string.Empty;
+    public TeamActivityType Type { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Author { get; set; } = string.Empty;
+    public string? AuthorAvatarUrl { get; set; }
+    public DateTime Timestamp { get; set; }
+    public string? Url { get; set; }
+    public string? Repository { get; set; }
+}
+
+public enum TeamActivityType
+{
+    PRCreated,
+    DraftPRCreated,
+    PipelineSucceeded
+}

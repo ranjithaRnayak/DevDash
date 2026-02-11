@@ -13,6 +13,7 @@ public class DevOpsController : ControllerBase
     private readonly IDevOpsService _devOpsService;
     private readonly IGitHubService _gitHubService;
     private readonly ITestPlanService _testPlanService;
+    private readonly ITeamActivityService _teamActivityService;
     private readonly ICacheService _cacheService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DevOpsController> _logger;
@@ -21,6 +22,7 @@ public class DevOpsController : ControllerBase
         IDevOpsService devOpsService,
         IGitHubService gitHubService,
         ITestPlanService testPlanService,
+        ITeamActivityService teamActivityService,
         ICacheService cacheService,
         IConfiguration configuration,
         ILogger<DevOpsController> logger)
@@ -28,6 +30,7 @@ public class DevOpsController : ControllerBase
         _devOpsService = devOpsService;
         _gitHubService = gitHubService;
         _testPlanService = testPlanService;
+        _teamActivityService = teamActivityService;
         _cacheService = cacheService;
         _configuration = configuration;
         _logger = logger;
@@ -365,6 +368,24 @@ public class DevOpsController : ControllerBase
         {
             _logger.LogError(ex, "Failed to get test plan debug info");
             return StatusCode(500, new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Get team activity notifications (PRs, pipelines from team members)
+    /// </summary>
+    [HttpGet("team/activities")]
+    public async Task<ActionResult<TeamActivityResponse>> GetTeamActivities([FromQuery] DateTime? since = null)
+    {
+        try
+        {
+            var activities = await _teamActivityService.GetTeamActivitiesAsync(since);
+            return Ok(activities);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch team activities");
+            return StatusCode(500, new { error = "Failed to fetch team activities" });
         }
     }
 
