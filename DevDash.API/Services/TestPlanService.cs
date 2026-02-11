@@ -311,24 +311,27 @@ public class TestPlanService : ITestPlanService
 
     /// <summary>
     /// Check if the outcome represents a test that was executed but is not passed/failed/blocked
+    /// Azure DevOps Analytics counts NotApplicable as Executed, so include it here
     /// </summary>
     private static bool IsOtherExecutedOutcome(string? outcome)
     {
         if (string.IsNullOrEmpty(outcome)) return false;
 
         // These outcomes indicate the test was executed but has a non-standard result
-        var executedOutcomes = new[] { "inProgress", "paused", "error", "warning", "timeout", "aborted", "inconclusive" };
+        // NotApplicable is counted as Executed in Azure DevOps Analytics API
+        var executedOutcomes = new[] { "notApplicable", "inProgress", "paused", "error", "warning", "timeout", "aborted", "inconclusive" };
         return executedOutcomes.Any(o => outcome.Equals(o, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
-    /// Check if the outcome represents a test that has not been run
+    /// Check if the outcome represents a test that has not been run (NotExecuted in Analytics API)
     /// </summary>
     private static bool IsNotRunOutcome(string? outcome)
     {
-        // Null, empty, "none", "unspecified", or "notApplicable" means not run
+        // Null, empty, "none", "unspecified" means not run
+        // Note: "notApplicable" is NOT included here - it counts as Executed in Azure DevOps
         if (string.IsNullOrEmpty(outcome)) return true;
-        var notRunOutcomes = new[] { "none", "unspecified", "notApplicable", "notExecuted" };
+        var notRunOutcomes = new[] { "none", "unspecified", "notExecuted" };
         return notRunOutcomes.Any(o => outcome.Equals(o, StringComparison.OrdinalIgnoreCase));
     }
 
