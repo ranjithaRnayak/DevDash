@@ -642,10 +642,13 @@ public class PerformanceService : IPerformanceService
     /// </summary>
     public async Task<StoryPointsSummary> GetMyStoryPointsAsync()
     {
+        _logger.LogInformation("=== GetMyStoryPointsAsync STARTED ===");
+
         try
         {
             var user = await GetAuthenticatedAzDoUserAsync();
             var project = _configuration["AzureDevOps:Project"];
+            _logger.LogInformation("Story Points - Got user {UserId}, project: {Project}", user.Id, project);
 
             // Try to get team name from user's team membership
             var team = await GetUserTeamNameAsync(user);
