@@ -43,11 +43,12 @@ export const DASHBOARD_CONFIGS = {
         },
         features: {
             showPipelineStatus: true,
-            showPRAlerts: true,
+            showPRAlerts: false,
             showCodeQuality: true,
-            showPerformanceMetrics: false,
+            showPerformanceMetrics: true,
             showAIAssistant: true,
             showLighthouse: true,
+            showTestPlanProgress: true,
         },
     },
 };

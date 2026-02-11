@@ -3,6 +3,8 @@ import PipelineStatus from '../components/PipelineStatus';
 import PRAlerts from '../components/PRAlerts';
 import CodeQuality from '../components/CodeQuality';
 import AIAssistant from '../components/AIAssistant';
+import PerformanceCard from '../components/PerformanceCard';
+import TestPlanProgress from '../components/TestPlanProgress';
 import { DASHBOARD_CONFIGS } from '../config/dashboards';
 
 const dashboardConfig = DASHBOARD_CONFIGS.test;
@@ -21,6 +23,14 @@ const TestDashboard = memo(function TestDashboard() {
                         dashboardId="test"
                         pipelines={dashboardConfig.azureDevOps.pipelines}
                     />
+                )}
+
+                {dashboardConfig.features.showPerformanceMetrics && (
+                    <PerformanceCard dashboardId="test" />
+                )}
+
+                {dashboardConfig.features.showTestPlanProgress && (
+                    <TestPlanProgress dashboardId="test" />
                 )}
 
                 {dashboardConfig.features.showPRAlerts && (

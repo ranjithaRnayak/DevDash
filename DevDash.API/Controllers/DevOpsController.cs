@@ -12,6 +12,7 @@ public class DevOpsController : ControllerBase
 {
     private readonly IDevOpsService _devOpsService;
     private readonly IGitHubService _gitHubService;
+    private readonly ITestPlanService _testPlanService;
     private readonly ICacheService _cacheService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DevOpsController> _logger;
@@ -19,12 +20,14 @@ public class DevOpsController : ControllerBase
     public DevOpsController(
         IDevOpsService devOpsService,
         IGitHubService gitHubService,
+        ITestPlanService testPlanService,
         ICacheService cacheService,
         IConfiguration configuration,
         ILogger<DevOpsController> logger)
     {
         _devOpsService = devOpsService;
         _gitHubService = gitHubService;
+        _testPlanService = testPlanService;
         _cacheService = cacheService;
         _configuration = configuration;
         _logger = logger;
@@ -326,6 +329,24 @@ public class DevOpsController : ControllerBase
         {
             _logger.LogError(ex, "Failed to fetch team members");
             return StatusCode(500, new { error = "Failed to fetch team members" });
+        }
+    }
+
+    /// <summary>
+    /// Get test plan progress report
+    /// </summary>
+    [HttpGet("testplans/progress")]
+    public async Task<ActionResult<TestPlanProgress>> GetTestPlanProgress()
+    {
+        try
+        {
+            var progress = await _testPlanService.GetTestPlanProgressAsync();
+            return Ok(progress);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch test plan progress");
+            return StatusCode(500, new { error = "Failed to fetch test plan progress" });
         }
     }
 }
