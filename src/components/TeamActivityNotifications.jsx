@@ -4,7 +4,7 @@ import { useToast } from './Toast';
 
 const POLL_INTERVAL = 30000; // 30 seconds for more timely notifications
 const DISMISSED_KEY = 'devdash_dismissed_activities';
-const INITIAL_LOAD_WINDOW = 5 * 60 * 1000; // Show toasts for activities from last 5 minutes on initial load
+const INITIAL_LOAD_WINDOW = 8 * 60 * 60 * 1000; // Show toasts for activities from last 8 hours on initial load
 
 function getDismissedActivities() {
   try {
