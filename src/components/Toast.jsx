@@ -10,11 +10,13 @@ export function useToast() {
   return context;
 }
 
+let toastIdCounter = 0;
+
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
   const addToast = useCallback((toast) => {
-    const id = Date.now().toString();
+    const id = `toast-${Date.now()}-${++toastIdCounter}`;
     setToasts((prev) => [...prev, { ...toast, id }]);
     return id;
   }, []);
@@ -56,6 +58,7 @@ function ToastItem({ toast, onDismiss }) {
 
   const handleDismiss = () => {
     setIsExiting(true);
+    toast.onDismiss?.();
     setTimeout(onDismiss, 300);
   };
 

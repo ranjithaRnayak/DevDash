@@ -382,6 +382,55 @@ TestPlanProgress.jsx
 
 ---
 
+### 7. TeamActivityNotifications
+
+**Purpose:** Toast notifications for team PR and pipeline activity.
+
+**Why Needed:**
+- Stay aware of team activity without constantly refreshing
+- Know when teammates create PRs or complete builds
+- Configurable window for weekends/leaves
+
+**Data Flow:**
+```
+TeamActivityNotifications.jsx
+    └── useEffect (on mount + every 30s)
+        └── devOpsAPI.getTeamActivities(since)
+            └── DevOpsController.GetTeamActivities()
+                └── TeamActivityService.GetTeamActivitiesAsync()
+                    ├── DevOpsService.GetPullRequestsAsync()
+                    ├── GitHubService.GetPullRequestsAsync()
+                    └── DevOpsService.GetRecentBuildsAsync()
+                        └── Filter by timestamp, exclude current user
+```
+
+**Key Features:**
+- **Polling:** Checks for new activities every 30 seconds
+- **Initial Load Window:** Configurable via `VITE_NOTIFICATION_WINDOW_HOURS`
+- **Dismiss Persistence:** Dismissed notifications saved to localStorage
+- **Activity Types:** PRCreated, DraftPRCreated, PipelineSucceeded
+
+**Toast Flow:**
+```
+Activity fetched
+    └── Check if already seen (seenActivitiesRef)
+        └── Check if dismissed (localStorage)
+            └── Check activity age vs window
+                └── addToast() → ToastProvider state
+                    └── ToastContainer renders ToastItem
+                        └── Dismiss → toast.onDismiss() + removeToast()
+```
+
+**Configuration:**
+```bash
+# .env
+VITE_NOTIFICATION_WINDOW_HOURS=8   # Normal workday
+VITE_NOTIFICATION_WINDOW_HOURS=48  # After weekend
+VITE_NOTIFICATION_WINDOW_HOURS=72  # After long leave
+```
+
+---
+
 ## API Client Architecture
 
 ### Why Centralized backendClient.js
@@ -664,7 +713,9 @@ DevDash/
 │   │   ├── CodeQuality.jsx     # SonarQube metrics
 │   │   ├── PerformanceCard.jsx # Personal metrics
 │   │   ├── TestPlanProgress.jsx # Test plan pass rates
-│   │   └── AIAssistant.jsx     # AI chat
+│   │   ├── AIAssistant.jsx     # AI chat
+│   │   ├── Toast.jsx           # Toast notification system
+│   │   └── TeamActivityNotifications.jsx # Team activity polling
 │   ├── context/
 │   │   └── AuthContext.jsx     # Auth state management
 │   ├── hooks/
@@ -687,6 +738,7 @@ DevDash/
     │   ├── DevOpsService.cs       # Azure DevOps & GitHub integration
     │   ├── PerformanceService.cs  # User-specific metrics (dual auth)
     │   ├── TestPlanService.cs     # Test plan progress (parallel API)
+    │   ├── TeamActivityService.cs # Team activity notifications
     │   ├── SonarQubeService.cs
     │   ├── CacheService.cs        # In-memory/Redis caching
     │   └── AIService.cs

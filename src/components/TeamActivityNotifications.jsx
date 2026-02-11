@@ -2,9 +2,8 @@ import { useEffect, useRef, useCallback } from 'react';
 import { devOpsAPI } from '../api/backendClient';
 import { useToast } from './Toast';
 
-const POLL_INTERVAL = 30000; // 30 seconds for more timely notifications
+const POLL_INTERVAL = 30000;
 const DISMISSED_KEY = 'devdash_dismissed_activities';
-// Configurable via VITE_NOTIFICATION_WINDOW_HOURS env variable (default: 8 hours)
 const NOTIFICATION_WINDOW_HOURS = parseInt(import.meta.env.VITE_NOTIFICATION_WINDOW_HOURS, 10) || 8;
 const INITIAL_LOAD_WINDOW = NOTIFICATION_WINDOW_HOURS * 60 * 60 * 1000;
 
@@ -30,7 +29,6 @@ function dismissActivity(id) {
     filtered.push({ id, timestamp: Date.now() });
     localStorage.setItem(DISMISSED_KEY, JSON.stringify(filtered));
   } catch {
-    // Ignore storage errors
   }
 }
 
@@ -53,8 +51,6 @@ export default function TeamActivityNotifications() {
 
         seenActivitiesRef.current.add(activity.id);
 
-        // On initial load, only show toasts for very recent activities (last 5 min)
-        // to avoid spamming with old notifications
         if (!initialFetchDoneRef.current) {
           const activityAge = Date.now() - new Date(activity.timestamp).getTime();
           if (activityAge > INITIAL_LOAD_WINDOW) continue;
