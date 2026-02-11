@@ -294,19 +294,6 @@ public class TestPlanService : ITestPlanService
         }
     }
 
-    #region Configuration Models
-
-    /// <summary>
-    /// Configuration for a test plan - must be public for configuration binding
-    /// </summary>
-    public class TestPlanConfig
-    {
-        public string Name { get; set; } = string.Empty;
-        public List<string> Suites { get; set; } = new();
-    }
-
-    #endregion
-
     #region Azure DevOps API Response Models
 
     private class AzDoTestPlansResponse

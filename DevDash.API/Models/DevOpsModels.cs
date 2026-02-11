@@ -258,3 +258,12 @@ public class TestSuiteSummary
     public int NotRunCount { get; set; }
     public double PassRate { get; set; }
 }
+
+/// <summary>
+/// Configuration for a test plan - used for appsettings.json binding
+/// </summary>
+public class TestPlanConfig
+{
+    public string Name { get; set; } = string.Empty;
+    public List<string> Suites { get; set; } = new();
+}
