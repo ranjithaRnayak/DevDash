@@ -9,7 +9,22 @@ namespace DevDash.API.Services;
 /// </summary>
 public interface ITestPlanService
 {
-    Task<TestPlanProgress> GetTestPlanProgressAsync();
+    Task<TestPlanProgress> GetTestPlanProgressAsync(bool bypassCache = false);
+    TestPlanDebugInfo GetDebugInfo();
+}
+
+/// <summary>
+/// Debug information for TestPlanService configuration
+/// </summary>
+public class TestPlanDebugInfo
+{
+    public string? OrganizationUrl { get; set; }
+    public string? Project { get; set; }
+    public bool HasPAT { get; set; }
+    public int ConfiguredPlanCount { get; set; }
+    public List<string> ConfiguredPlanNames { get; set; } = new();
+    public bool HttpClientConfigured { get; set; }
+    public string? HttpClientBaseAddress { get; set; }
 }
 
 /// <summary>
@@ -33,21 +48,49 @@ public class TestPlanService : ITestPlanService
         _cacheService = cacheService;
         _logger = logger;
 
+        // Immediate startup logging - should appear as soon as service is created
+        Console.WriteLine("========================================");
+        Console.WriteLine("[TestPlanService] CONSTRUCTOR CALLED");
+        Console.WriteLine("========================================");
+
         ConfigureHttpClient();
     }
 
     private void ConfigureHttpClient()
     {
-        var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
-        var pat = _configuration["AzureDevOps:PAT"];
-        var project = _configuration["AzureDevOps:Project"];
-        var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
+        Console.WriteLine("[TestPlanService] ConfigureHttpClient() starting...");
 
-        // Console output for debugging
-        Console.WriteLine($"[TestPlanService] Initialized - OrgUrl: {orgUrl ?? "NOT SET"}, Project: {project ?? "NOT SET"}, PAT: {!string.IsNullOrEmpty(pat)}, Plans: {plansConfig.Count}");
+        // Log each configuration value fetch individually to see what's happening
+        Console.WriteLine("[TestPlanService] Reading AzureDevOps:OrganizationUrl...");
+        var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
+        Console.WriteLine($"[TestPlanService] AzureDevOps:OrganizationUrl = '{orgUrl ?? "NULL"}'");
+
+        Console.WriteLine("[TestPlanService] Reading AzureDevOps:PAT...");
+        var pat = _configuration["AzureDevOps:PAT"];
+        Console.WriteLine($"[TestPlanService] AzureDevOps:PAT exists = {!string.IsNullOrEmpty(pat)}");
+
+        Console.WriteLine("[TestPlanService] Reading AzureDevOps:Project...");
+        var project = _configuration["AzureDevOps:Project"];
+        Console.WriteLine($"[TestPlanService] AzureDevOps:Project = '{project ?? "NULL"}'");
+
+        Console.WriteLine("[TestPlanService] Reading TestPlans:Plans section...");
+        var plansSection = _configuration.GetSection("TestPlans:Plans");
+        Console.WriteLine($"[TestPlanService] TestPlans:Plans section exists = {plansSection.Exists()}");
+
+        var plansConfig = plansSection.Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
+        Console.WriteLine($"[TestPlanService] TestPlans:Plans deserialized count = {plansConfig.Count}");
+
+        // Log each plan's details
         foreach (var plan in plansConfig)
         {
-            Console.WriteLine($"[TestPlanService] Configured plan: '{plan.Name}' with {plan.Suites?.Count ?? 0} suites");
+            Console.WriteLine($"[TestPlanService] Configured plan: Name='{plan.Name}', Suites count={plan.Suites?.Count ?? 0}");
+            if (plan.Suites != null && plan.Suites.Count > 0)
+            {
+                foreach (var suite in plan.Suites)
+                {
+                    Console.WriteLine($"[TestPlanService]   - Suite: '{suite}'");
+                }
+            }
         }
 
         _logger.LogInformation("TestPlanService initialized - OrgUrl: {OrgUrl}, Project: {Project}, PAT configured: {HasPAT}, Plans configured: {PlanCount}",
@@ -77,34 +120,73 @@ public class TestPlanService : ITestPlanService
         }
     }
 
-    public async Task<TestPlanProgress> GetTestPlanProgressAsync()
+    public TestPlanDebugInfo GetDebugInfo()
     {
-        Console.WriteLine("[TestPlanService] GetTestPlanProgressAsync called");
-        _logger.LogInformation("GetTestPlanProgressAsync called");
+        Console.WriteLine("[TestPlanService] GetDebugInfo called");
+        var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
+        var project = _configuration["AzureDevOps:Project"];
+        var pat = _configuration["AzureDevOps:PAT"];
+        var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
+
+        return new TestPlanDebugInfo
+        {
+            OrganizationUrl = orgUrl,
+            Project = project,
+            HasPAT = !string.IsNullOrEmpty(pat),
+            ConfiguredPlanCount = plansConfig.Count,
+            ConfiguredPlanNames = plansConfig.Select(p => p.Name).ToList(),
+            HttpClientConfigured = _httpClient.BaseAddress != null,
+            HttpClientBaseAddress = _httpClient.BaseAddress?.ToString()
+        };
+    }
+
+    public async Task<TestPlanProgress> GetTestPlanProgressAsync(bool bypassCache = false)
+    {
+        Console.WriteLine($"[TestPlanService] GetTestPlanProgressAsync called (bypassCache: {bypassCache})");
+        _logger.LogInformation("GetTestPlanProgressAsync called (bypassCache: {BypassCache})", bypassCache);
 
         var cacheDuration = _configuration.GetValue<int>("TestPlans:CacheDurationMinutes", 5);
         var cacheKey = "testplans:progress";
-        var cached = await _cacheService.GetAsync<TestPlanProgress>(cacheKey);
-        if (cached != null)
+
+        if (!bypassCache)
         {
-            _logger.LogInformation("Returning cached test plan progress");
-            return cached;
+            var cached = await _cacheService.GetAsync<TestPlanProgress>(cacheKey);
+            if (cached != null)
+            {
+                Console.WriteLine("[TestPlanService] Returning cached test plan progress");
+                _logger.LogInformation("Returning cached test plan progress");
+                return cached;
+            }
+        }
+        else
+        {
+            Console.WriteLine("[TestPlanService] Bypassing cache");
         }
 
         try
         {
+            Console.WriteLine("[TestPlanService] Starting to fetch test plan progress...");
+
             var project = _configuration["AzureDevOps:Project"];
             var orgUrl = _configuration["AzureDevOps:OrganizationUrl"]?.TrimEnd('/');
+
+            Console.WriteLine($"[TestPlanService] Project: '{project ?? "NULL"}', OrgUrl: '{orgUrl ?? "NULL"}'");
+            Console.WriteLine("[TestPlanService] Re-reading TestPlans:Plans for this request...");
+
             var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
+            Console.WriteLine($"[TestPlanService] Plans configured: {plansConfig.Count}");
 
             _logger.LogInformation("Fetching test plan progress - Project: {Project}, PlansConfigured: {Count}",
                 project ?? "NOT SET", plansConfig.Count);
 
             if (plansConfig.Count == 0)
             {
+                Console.WriteLine("[TestPlanService] WARNING: No test plans configured! Returning empty progress.");
                 _logger.LogWarning("No test plans configured in TestPlans:Plans");
                 return new TestPlanProgress();
             }
+
+            Console.WriteLine($"[TestPlanService] Will process {plansConfig.Count} configured plans");
 
             var allPlans = await GetAllTestPlansAsync(project!);
             _logger.LogInformation("Found {Count} test plans in Azure DevOps: {Names}",
