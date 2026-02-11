@@ -58,15 +58,17 @@ public class PerformanceController : ControllerBase
             var commitsTask = GetAllCommitsAsync();
             var storyPointsTask = _performanceService.GetMyStoryPointsAsync();
             var userTask = _performanceService.GetAuthenticatedAzDoUserAsync();
+            var teamTask = _performanceService.GetMyTeamAsync();
 
-            await Task.WhenAll(draftPRsTask, commitsTask, storyPointsTask, userTask);
+            await Task.WhenAll(draftPRsTask, commitsTask, storyPointsTask, userTask, teamTask);
 
             var response = new PerformanceDashboardResponse
             {
                 User = userTask.Result,
                 DraftPRs = draftPRsTask.Result,
                 RecentCommits = commitsTask.Result,
-                StoryPoints = storyPointsTask.Result
+                StoryPoints = storyPointsTask.Result,
+                Team = teamTask.Result
             };
 
             return Ok(response);
@@ -160,6 +162,24 @@ public class PerformanceController : ControllerBase
     }
 
     /// <summary>
+    /// Get the current user's team and team members
+    /// </summary>
+    [HttpGet("my-team")]
+    public async Task<ActionResult<UserTeamInfo>> GetMyTeam()
+    {
+        try
+        {
+            var teamInfo = await _performanceService.GetMyTeamAsync();
+            return Ok(teamInfo);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch user's team");
+            return StatusCode(500, new { error = "Failed to fetch team information" });
+        }
+    }
+
+    /// <summary>
     /// Get a specific draft PR with reviewer details for scheduling
     /// </summary>
     [HttpGet("draft-prs/{source}/{prId}")]
@@ -233,4 +253,5 @@ public class PerformanceDashboardResponse
     public List<DraftPullRequest> DraftPRs { get; set; } = new();
     public List<RecentCommit> RecentCommits { get; set; } = new();
     public StoryPointsSummary StoryPoints { get; set; } = new();
+    public UserTeamInfo? Team { get; set; }
 }
