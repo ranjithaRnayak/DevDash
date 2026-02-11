@@ -77,18 +77,26 @@ public class TestPlanService : ITestPlanService
             }
 
             var allPlans = await GetAllTestPlansAsync(project!);
+            _logger.LogInformation("Found {Count} test plans in Azure DevOps: {Names}",
+                allPlans.Count, string.Join(", ", allPlans.Select(p => p.Name)));
+
             var progress = new TestPlanProgress();
 
             foreach (var planConfig in plansConfig)
             {
                 var matchingPlan = allPlans.FirstOrDefault(p =>
-                    p.Name?.Equals(planConfig.Name, StringComparison.OrdinalIgnoreCase) == true);
+                    p.Name?.Contains(planConfig.Name, StringComparison.OrdinalIgnoreCase) == true ||
+                    planConfig.Name.Contains(p.Name ?? "", StringComparison.OrdinalIgnoreCase));
 
                 if (matchingPlan == null)
                 {
-                    _logger.LogWarning("Test plan '{PlanName}' not found in Azure DevOps", planConfig.Name);
+                    _logger.LogWarning("Test plan '{PlanName}' not found in Azure DevOps. Available plans: {AvailablePlans}",
+                        planConfig.Name, string.Join(", ", allPlans.Select(p => p.Name)));
                     continue;
                 }
+
+                _logger.LogInformation("Matched plan config '{ConfigName}' to Azure DevOps plan '{AzdoName}' (ID: {Id})",
+                    planConfig.Name, matchingPlan.Name, matchingPlan.Id);
 
                 var planSummary = new TestPlanSummary
                 {
@@ -98,19 +106,40 @@ public class TestPlanService : ITestPlanService
                 };
 
                 var allSuites = await GetTestSuitesAsync(project!, matchingPlan.Id);
+                _logger.LogInformation("Found {Count} suites in plan '{PlanName}': {Suites}",
+                    allSuites.Count, matchingPlan.Name, string.Join(", ", allSuites.Select(s => s.Name)));
 
-                foreach (var suiteName in planConfig.Suites)
+                List<AzDoTestSuite> suitesToProcess;
+
+                if (planConfig.Suites == null || planConfig.Suites.Count == 0)
                 {
-                    var matchingSuite = allSuites.FirstOrDefault(s =>
-                        s.Name?.Equals(suiteName, StringComparison.OrdinalIgnoreCase) == true);
-
-                    if (matchingSuite == null)
+                    suitesToProcess = allSuites;
+                    _logger.LogInformation("No specific suites configured, including all {Count} suites", allSuites.Count);
+                }
+                else
+                {
+                    suitesToProcess = new List<AzDoTestSuite>();
+                    foreach (var suiteName in planConfig.Suites)
                     {
-                        _logger.LogWarning("Test suite '{SuiteName}' not found in plan '{PlanName}'", suiteName, planConfig.Name);
-                        continue;
-                    }
+                        var matchingSuite = allSuites.FirstOrDefault(s =>
+                            s.Name?.Contains(suiteName, StringComparison.OrdinalIgnoreCase) == true ||
+                            suiteName.Contains(s.Name ?? "", StringComparison.OrdinalIgnoreCase));
 
-                    var suiteSummary = await GetSuiteProgressAsync(project!, matchingPlan.Id, matchingSuite.Id, matchingSuite.Name ?? suiteName, orgUrl!);
+                        if (matchingSuite != null)
+                        {
+                            suitesToProcess.Add(matchingSuite);
+                            _logger.LogInformation("Matched suite config '{ConfigName}' to '{AzdoName}'", suiteName, matchingSuite.Name);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("Test suite '{SuiteName}' not found in plan '{PlanName}'", suiteName, planConfig.Name);
+                        }
+                    }
+                }
+
+                foreach (var suite in suitesToProcess)
+                {
+                    var suiteSummary = await GetSuiteProgressAsync(project!, matchingPlan.Id, suite.Id, suite.Name ?? "Unknown", orgUrl!);
                     if (suiteSummary != null)
                     {
                         planSummary.Suites.Add(suiteSummary);
