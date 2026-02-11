@@ -296,7 +296,10 @@ public class TestPlanService : ITestPlanService
 
     #region Configuration Models
 
-    private class TestPlanConfig
+    /// <summary>
+    /// Configuration for a test plan - must be public for configuration binding
+    /// </summary>
+    public class TestPlanConfig
     {
         public string Name { get; set; } = string.Empty;
         public List<string> Suites { get; set; } = new();
