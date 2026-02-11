@@ -23,7 +23,6 @@ public class TestPlanDebugInfo
     public string? OrganizationUrl { get; set; }
     public string? AnalyticsUrl { get; set; }
     public string? Project { get; set; }
-    public string? ProjectId { get; set; }
     public bool HasPAT { get; set; }
     public int ConfiguredPlanCount { get; set; }
     public List<string> ConfiguredPlanNames { get; set; } = new();
@@ -73,10 +72,6 @@ public class TestPlanService : ITestPlanService
 
         var project = _configuration["AzureDevOps:Project"];
         Console.WriteLine($"[TestPlanService] AzureDevOps:Project = '{project ?? "NULL"}'");
-
-        // Get project ID for Analytics API (optional, can use project name)
-        var projectId = _configuration["AzureDevOps:ProjectId"];
-        Console.WriteLine($"[TestPlanService] AzureDevOps:ProjectId = '{projectId ?? "NULL"}'");
 
         var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
         Console.WriteLine($"[TestPlanService] TestPlans:Plans deserialized count = {plansConfig.Count}");
@@ -149,7 +144,6 @@ public class TestPlanService : ITestPlanService
         Console.WriteLine("[TestPlanService] GetDebugInfo called");
         var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
         var project = _configuration["AzureDevOps:Project"];
-        var projectId = _configuration["AzureDevOps:ProjectId"];
         var pat = _configuration["AzureDevOps:PAT"];
         var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
 
@@ -158,7 +152,6 @@ public class TestPlanService : ITestPlanService
             OrganizationUrl = orgUrl,
             AnalyticsUrl = _analyticsBaseUrl,
             Project = project,
-            ProjectId = projectId,
             HasPAT = !string.IsNullOrEmpty(pat),
             ConfiguredPlanCount = plansConfig.Count,
             ConfiguredPlanNames = plansConfig.Select(p => p.Name).ToList(),
@@ -193,10 +186,9 @@ public class TestPlanService : ITestPlanService
             Console.WriteLine("[TestPlanService] Starting to fetch test plan progress...");
 
             var project = _configuration["AzureDevOps:Project"];
-            var projectId = _configuration["AzureDevOps:ProjectId"] ?? project;
             var orgUrl = _configuration["AzureDevOps:OrganizationUrl"]?.TrimEnd('/');
 
-            Console.WriteLine($"[TestPlanService] Project: '{project}', ProjectId: '{projectId}', OrgUrl: '{orgUrl}'");
+            Console.WriteLine($"[TestPlanService] Project: '{project}', OrgUrl: '{orgUrl}'");
             Console.WriteLine($"[TestPlanService] Analytics URL: '{_analyticsBaseUrl}'");
 
             var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
@@ -233,7 +225,7 @@ public class TestPlanService : ITestPlanService
 
                 // Use Analytics OData API to get test point outcomes
                 var planSummary = await GetTestPlanProgressFromAnalyticsAsync(
-                    projectId!,
+                    project!,
                     matchingPlan.Id,
                     matchingPlan.Name ?? planConfig.Name,
                     planConfig.Suites,
@@ -270,7 +262,7 @@ public class TestPlanService : ITestPlanService
     }
 
     private async Task<TestPlanSummary?> GetTestPlanProgressFromAnalyticsAsync(
-        string projectId,
+        string project,
         int planId,
         string planName,
         List<string>? suiteFilters,
@@ -283,7 +275,7 @@ public class TestPlanService : ITestPlanService
             // Query TestPoints with groupby on TestSuite and Outcome
             // This gives us counts per suite and outcome
             var oDataQuery = $"$apply=filter(TestPlanId eq {planId})/groupby((TestSuiteId, TestSuiteTitle, Outcome), aggregate($count as Count))";
-            var analyticsUrl = $"{_analyticsBaseUrl}/{projectId}/_odata/v4.0-preview/TestPoints?{oDataQuery}";
+            var analyticsUrl = $"{_analyticsBaseUrl}/{project}/_odata/v4.0-preview/TestPoints?{oDataQuery}";
 
             Console.WriteLine($"[TestPlanService] Analytics URL: {analyticsUrl}");
 
@@ -299,7 +291,7 @@ public class TestPlanService : ITestPlanService
 
                 // Fallback to REST API
                 Console.WriteLine("[TestPlanService] Falling back to REST API...");
-                return await GetTestPlanProgressFromRestApiAsync(projectId, planId, planName, suiteFilters, orgUrl);
+                return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
             }
 
             var analyticsResult = JsonSerializer.Deserialize<ODataResponse<TestPointAnalytics>>(responseContent, new JsonSerializerOptions
@@ -310,7 +302,7 @@ public class TestPlanService : ITestPlanService
             if (analyticsResult?.Value == null || analyticsResult.Value.Count == 0)
             {
                 Console.WriteLine("[TestPlanService] No data from Analytics API, trying REST API...");
-                return await GetTestPlanProgressFromRestApiAsync(projectId, planId, planName, suiteFilters, orgUrl);
+                return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
             }
 
             Console.WriteLine($"[TestPlanService] Got {analyticsResult.Value.Count} rows from Analytics API");
@@ -319,7 +311,7 @@ public class TestPlanService : ITestPlanService
             {
                 Id = planId,
                 Name = planName,
-                Url = $"{orgUrl}/{projectId}/_testPlans/execute?planId={planId}"
+                Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}"
             };
 
             // Group by suite
@@ -352,7 +344,7 @@ public class TestPlanService : ITestPlanService
                     Id = suiteId,
                     PlanId = planId,
                     Name = suiteName,
-                    Url = $"{orgUrl}/{projectId}/_testPlans/execute?planId={planId}&suiteId={suiteId}"
+                    Url = $"{orgUrl}/{project}/_testPlans/execute?planId={planId}&suiteId={suiteId}"
                 };
 
                 foreach (var row in suiteGroup)
@@ -405,7 +397,7 @@ public class TestPlanService : ITestPlanService
             _logger.LogError(ex, "Failed to get test plan progress from Analytics API for plan {PlanId}", planId);
 
             // Fallback to REST API
-            return await GetTestPlanProgressFromRestApiAsync(projectId, planId, planName, suiteFilters, orgUrl);
+            return await GetTestPlanProgressFromRestApiAsync(project, planId, planName, suiteFilters, orgUrl);
         }
     }
 
