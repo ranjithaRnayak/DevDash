@@ -4,7 +4,9 @@ import { useToast } from './Toast';
 
 const POLL_INTERVAL = 30000; // 30 seconds for more timely notifications
 const DISMISSED_KEY = 'devdash_dismissed_activities';
-const INITIAL_LOAD_WINDOW = 8 * 60 * 60 * 1000; // Show toasts for activities from last 8 hours on initial load
+// Configurable via VITE_NOTIFICATION_WINDOW_HOURS env variable (default: 8 hours)
+const NOTIFICATION_WINDOW_HOURS = parseInt(import.meta.env.VITE_NOTIFICATION_WINDOW_HOURS, 10) || 8;
+const INITIAL_LOAD_WINDOW = NOTIFICATION_WINDOW_HOURS * 60 * 60 * 1000;
 
 function getDismissedActivities() {
   try {
