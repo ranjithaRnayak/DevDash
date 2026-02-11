@@ -35,8 +35,6 @@ public class PerformanceService : IPerformanceService
     private readonly ICacheService _cacheService;
     private readonly ILogger<PerformanceService> _logger;
     private readonly IHttpContextAccessor _httpContextAccessor;
-
-    // Cached authenticated user info
     private AzDoUserInfo? _cachedUser;
 
     public PerformanceService(
@@ -59,7 +57,6 @@ public class PerformanceService : IPerformanceService
 
     private void ConfigureClients()
     {
-        // Azure DevOps configuration
         var azDoOrgUrl = _configuration["AzureDevOps:OrganizationUrl"];
         var azDoPat = _configuration["AzureDevOps:PAT"];
 
@@ -74,7 +71,6 @@ public class PerformanceService : IPerformanceService
             _azDoClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
         }
 
-        // GitHub configuration
         var gitHubApiUrl = _configuration["GitHub:ApiUrl"] ?? "https://api.github.com";
         var gitHubPat = _configuration["GitHub:PAT"];
 
@@ -86,29 +82,24 @@ public class PerformanceService : IPerformanceService
             _gitHubClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", gitHubPat);
         }
 
-        // Microsoft Graph configuration
         _graphClient.BaseAddress = new Uri("https://graph.microsoft.com/v1.0/");
     }
 
     /// <summary>
-    /// Get the authenticated user based on authentication mode:
-    /// - PAT mode: Get user from Azure DevOps API using PAT token
-    /// - Entra ID mode: Get user from HTTP context claims
+    /// Get the authenticated user based on authentication mode (PAT or Entra ID)
     /// </summary>
     public async Task<AzDoUserInfo> GetAuthenticatedAzDoUserAsync()
     {
-        // Check if we're in PAT mode or Entra ID mode
         var usePATToken = _configuration.GetValue<bool>("FeatureFlags:UsePATToken", false);
         var authType = GetAuthTypeFromClaims();
 
         _logger.LogInformation("Auth mode - UsePATToken: {UsePAT}, AuthType from claims: {AuthType}", usePATToken, authType);
 
-        // Build cache key based on auth context
         var userId = GetUserIdFromClaims();
         var cacheKey = $"azdo:authenticated-user:{userId ?? "default"}";
 
         var cached = await _cacheService.GetAsync<AzDoUserInfo>(cacheKey);
-        if (cached != null && cached.Id != "pat-user") // Don't return cached fallback
+        if (cached != null && cached.Id != "pat-user")
         {
             _logger.LogInformation("Returning cached user: {UserId}, {Email}", cached.Id, cached.Email);
             return cached;
@@ -118,7 +109,6 @@ public class PerformanceService : IPerformanceService
         {
             AzDoUserInfo? userInfo = null;
 
-            // If using Entra ID (not PAT mode), try to get user from claims first
             if (!usePATToken && authType != "PAT")
             {
                 userInfo = await GetUserFromEntraIdClaimsAsync();
@@ -129,7 +119,6 @@ public class PerformanceService : IPerformanceService
                 }
             }
 
-            // If no user from claims or in PAT mode, get from Azure DevOps API
             if (userInfo == null || userInfo.Id == "pat-user")
             {
                 userInfo = await GetUserFromAzureDevOpsApiAsync();
@@ -137,7 +126,6 @@ public class PerformanceService : IPerformanceService
 
             if (userInfo != null && userInfo.Id != "pat-user")
             {
-                // Cache for 30 minutes
                 await _cacheService.SetAsync(cacheKey, userInfo, TimeSpan.FromMinutes(30));
                 _cachedUser = userInfo;
                 return userInfo;
@@ -154,7 +142,7 @@ public class PerformanceService : IPerformanceService
     }
 
     /// <summary>
-    /// Get user info from Entra ID claims (for Entra ID auth mode)
+    /// Get user info from Entra ID claims
     /// </summary>
     private Task<AzDoUserInfo?> GetUserFromEntraIdClaimsAsync()
     {
@@ -165,8 +153,7 @@ public class PerformanceService : IPerformanceService
             return Task.FromResult<AzDoUserInfo?>(null);
         }
 
-        // Extract claims from Entra ID token
-        var objectId = user.FindFirst("oid")?.Value // Azure AD Object ID
+        var objectId = user.FindFirst("oid")?.Value
                        ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
         var email = user.FindFirst(ClaimTypes.Email)?.Value
                     ?? user.FindFirst("email")?.Value
@@ -208,14 +195,12 @@ public class PerformanceService : IPerformanceService
             return null;
         }
 
-        // Try connectionData API first
         var userInfo = await TryGetUserFromConnectionDataAsync();
         if (userInfo != null)
         {
             return userInfo;
         }
 
-        // Try profile API as fallback
         userInfo = await TryGetUserFromProfileApiAsync();
         return userInfo;
     }
@@ -249,7 +234,6 @@ public class PerformanceService : IPerformanceService
                 return null;
             }
 
-            // Extract email from various possible locations in the response
             var email = ExtractEmailFromConnectionData(data.AuthenticatedUser);
 
             var userInfo = new AzDoUserInfo
@@ -279,7 +263,6 @@ public class PerformanceService : IPerformanceService
     /// </summary>
     private string ExtractEmailFromConnectionData(AuthenticatedUserInfo user)
     {
-        // Try Properties.Account first (array of emails)
         if (user.Properties?.Account != null && user.Properties.Account.Count > 0)
         {
             var email = user.Properties.Account.FirstOrDefault();
@@ -287,13 +270,11 @@ public class PerformanceService : IPerformanceService
                 return email;
         }
 
-        // Try UniqueName (often contains email)
         if (!string.IsNullOrEmpty(user.UniqueName))
         {
             return user.UniqueName;
         }
 
-        // Try CustomDisplayName
         if (!string.IsNullOrEmpty(user.CustomDisplayName))
         {
             return user.CustomDisplayName;
@@ -309,12 +290,10 @@ public class PerformanceService : IPerformanceService
     {
         try
         {
-            // Profile API requires vssps.dev.azure.com endpoint
             var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
             if (string.IsNullOrEmpty(orgUrl))
                 return null;
 
-            // Extract organization name from URL
             var uri = new Uri(orgUrl);
             string? orgName = null;
 
@@ -333,7 +312,6 @@ public class PerformanceService : IPerformanceService
                 return null;
             }
 
-            // Create profile API client
             var pat = _configuration["AzureDevOps:PAT"];
             var profileUrl = $"https://vssps.dev.azure.com/{orgName}/_apis/profile/profiles/me?api-version=7.0";
 
@@ -419,7 +397,6 @@ public class PerformanceService : IPerformanceService
     {
         try
         {
-            // Check cache first
             var cacheKey = $"azdo:user-team:{user.Id}";
             var cachedTeam = await _cacheService.GetAsync<string>(cacheKey);
             if (!string.IsNullOrEmpty(cachedTeam))
@@ -430,7 +407,6 @@ public class PerformanceService : IPerformanceService
 
             var project = _configuration["AzureDevOps:Project"];
 
-            // Get all teams in the project
             var teamsResponse = await _azDoClient.GetAsync($"_apis/projects/{project}/teams?api-version=7.0");
             if (!teamsResponse.IsSuccessStatusCode)
             {
@@ -441,7 +417,6 @@ public class PerformanceService : IPerformanceService
             var teamsResult = await teamsResponse.Content.ReadFromJsonAsync<TeamsListResponse>();
             var teams = teamsResult?.Value ?? new List<TeamInfo>();
 
-            // Find which team the user belongs to
             foreach (var team in teams)
             {
                 var membersResponse = await _azDoClient.GetAsync(
@@ -453,7 +428,6 @@ public class PerformanceService : IPerformanceService
                 var membersResult = await membersResponse.Content.ReadFromJsonAsync<TeamMembersListResponse>();
                 var members = membersResult?.Value ?? new List<TeamMemberItem>();
 
-                // Check if current user is in this team
                 var userMember = members.FirstOrDefault(m =>
                     string.Equals(m.Identity?.Id, user.Id, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(m.Identity?.UniqueName, user.Email, StringComparison.OrdinalIgnoreCase) ||
@@ -462,8 +436,6 @@ public class PerformanceService : IPerformanceService
                 if (userMember != null && !string.IsNullOrEmpty(team.Name))
                 {
                     _logger.LogInformation("Found user {UserId} in team {TeamName}", user.Id, team.Name);
-
-                    // Cache for 1 hour
                     await _cacheService.SetAsync(cacheKey, team.Name, TimeSpan.FromHours(1));
                     return team.Name;
                 }
@@ -480,7 +452,7 @@ public class PerformanceService : IPerformanceService
     }
 
     /// <summary>
-    /// Get draft PRs created by the authenticated user (matches Azure DevOps "Mine" view)
+    /// Get draft PRs created by the authenticated user
     /// </summary>
     public async Task<List<DraftPullRequest>> GetMyDraftPRsAsync()
     {
@@ -488,12 +460,10 @@ public class PerformanceService : IPerformanceService
 
         try
         {
-            // First resolve the authenticated user
             var user = await GetAuthenticatedAzDoUserAsync();
             var project = _configuration["AzureDevOps:Project"];
             var repos = _configuration["AzureDevOps:Repos"]?.Split(',', StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
 
-            // If no specific repos configured, get all repos in the project
             if (repos.Length == 0)
             {
                 repos = await GetProjectRepositoriesAsync(project);
@@ -503,8 +473,6 @@ public class PerformanceService : IPerformanceService
             {
                 try
                 {
-                    // Use searchCriteria.creatorId with the authenticated user's ID
-                    // This matches the "Mine" view in Azure DevOps (?_a=mine)
                     var url = $"{project}/_apis/git/repositories/{repo.Trim()}/pullrequests?" +
                               $"searchCriteria.status=active&" +
                               $"searchCriteria.creatorId={user.Id}&" +
@@ -520,7 +488,6 @@ public class PerformanceService : IPerformanceService
 
                     var result = await response.Content.ReadFromJsonAsync<AzDoPRListResponse>();
 
-                    // Filter for draft PRs only
                     var userDrafts = result?.Value?
                         .Where(pr => pr.IsDraft == true)
                         .Select(pr => new DraftPullRequest
@@ -552,7 +519,6 @@ public class PerformanceService : IPerformanceService
                 }
             }
 
-            // Sort by creation date (newest first)
             drafts = drafts.OrderByDescending(d => d.CreatedAt).ToList();
         }
         catch (Exception ex)
@@ -587,7 +553,6 @@ public class PerformanceService : IPerformanceService
             {
                 try
                 {
-                    // Use author parameter with the user's email or unique name
                     var authorFilter = !string.IsNullOrEmpty(user.Email) ? user.Email : user.UniqueName;
                     var url = $"{project}/_apis/git/repositories/{repo.Trim()}/commits?" +
                               $"searchCriteria.author={Uri.EscapeDataString(authorFilter)}&" +
@@ -625,7 +590,6 @@ public class PerformanceService : IPerformanceService
                 }
             }
 
-            // Sort by date and take top 15
             commits = commits.OrderByDescending(c => c.Date).Take(15).ToList();
         }
         catch (Exception ex)
@@ -637,8 +601,7 @@ public class PerformanceService : IPerformanceService
     }
 
     /// <summary>
-    /// Get story points for PBIs/User Stories not started in current sprint
-    /// Excludes Tasks and only includes items in New/To Do/Approved states
+    /// Get story points/effort for work items not started in current sprint
     /// </summary>
     public async Task<StoryPointsSummary> GetMyStoryPointsAsync()
     {
@@ -650,20 +613,15 @@ public class PerformanceService : IPerformanceService
             var project = _configuration["AzureDevOps:Project"];
             _logger.LogInformation("Story Points - Got user {UserId}, project: {Project}", user.Id, project);
 
-            // Try to get team name from user's team membership
             var team = await GetUserTeamNameAsync(user);
             if (string.IsNullOrEmpty(team))
             {
-                // Fallback to config or default
                 team = _configuration["AzureDevOps:Team"] ?? $"{project} Team";
             }
 
             _logger.LogInformation("Fetching story points - User: {UserId}/{Email}, Project: {Project}, Team: {Team}",
                 user.Id, user.Email, project, team);
 
-            // Use @Me macro which works with PAT authentication
-            // This is more reliable than using email address
-            // Select both StoryPoints (Scrum) and Effort (Agile/CMMI) fields
             var wiqlQuery = new
             {
                 query = $@"
@@ -679,7 +637,6 @@ public class PerformanceService : IPerformanceService
 
             _logger.LogInformation("WIQL Query: {Query}", wiqlQuery.query);
 
-            // Use team in the WIQL endpoint for @CurrentIteration macro to work
             var wiqlUrl = $"{project}/{Uri.EscapeDataString(team)}/_apis/wit/wiql?api-version=7.0";
             _logger.LogInformation("WIQL URL: {Url}", wiqlUrl);
 
@@ -690,7 +647,6 @@ public class PerformanceService : IPerformanceService
                 var errorContent = await wiqlResponse.Content.ReadAsStringAsync();
                 _logger.LogWarning("WIQL query failed: {Status}, Error: {Error}", wiqlResponse.StatusCode, errorContent);
 
-                // Fallback: Try without @CurrentIteration filter
                 _logger.LogInformation("Trying fallback query without sprint filter...");
                 wiqlResponse = await _azDoClient.PostAsJsonAsync(
                     $"{project}/_apis/wit/wiql?api-version=7.0",
@@ -726,8 +682,6 @@ public class PerformanceService : IPerformanceService
                 return new StoryPointsSummary { NotStarted = 0, Total = 0, Items = new List<WorkItemInfo>() };
             }
 
-            // Fetch work item details (batch of up to 200)
-            // Request both StoryPoints (Scrum) and Effort (Agile/CMMI) fields
             var idsToFetch = string.Join(",", workItemIds.Take(200));
             var detailsResponse = await _azDoClient.GetAsync(
                 $"{project}/_apis/wit/workitems?ids={idsToFetch}&fields=System.Id,System.Title,System.State,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.WorkItemType&api-version=7.0");
@@ -746,14 +700,12 @@ public class PerformanceService : IPerformanceService
                     Id = wi.Id,
                     Title = wi.Fields?.Title ?? "",
                     State = wi.Fields?.State ?? "",
-                    // Use EffectivePoints which handles both StoryPoints (Scrum) and Effort (Agile/CMMI)
                     StoryPoints = wi.Fields?.EffectivePoints ?? 0,
                     Type = wi.Fields?.WorkItemType ?? "",
                     Url = BuildAzDoWorkItemUrl(project, wi.Id)
                 })
                 .ToList() ?? new List<WorkItemInfo>();
 
-            // Sum points (using EffectivePoints which handles both StoryPoints and Effort fields)
             var totalPoints = items.Sum(i => i.StoryPoints);
 
             _logger.LogInformation("Work items processed: {Items}",
@@ -765,7 +717,7 @@ public class PerformanceService : IPerformanceService
             {
                 NotStarted = totalPoints,
                 Total = items.Count,
-                Items = items.Take(10).ToList() // Return top 10 for display
+                Items = items.Take(10).ToList()
             };
         }
         catch (Exception ex)
@@ -792,7 +744,6 @@ public class PerformanceService : IPerformanceService
                 return drafts;
             }
 
-            // First get the authenticated GitHub user
             var userResponse = await _gitHubClient.GetAsync("user");
             if (!userResponse.IsSuccessStatusCode)
             {
@@ -808,7 +759,6 @@ public class PerformanceService : IPerformanceService
                 return drafts;
             }
 
-            // Get open PRs
             var prsResponse = await _gitHubClient.GetAsync($"repos/{owner}/{repo}/pulls?state=open&per_page=100");
             if (!prsResponse.IsSuccessStatusCode)
             {
@@ -817,7 +767,6 @@ public class PerformanceService : IPerformanceService
 
             var prs = await prsResponse.Content.ReadFromJsonAsync<List<GitHubPRResponse>>();
 
-            // Filter for drafts created by the authenticated user
             drafts = prs?
                 .Where(pr => pr.Draft == true && string.Equals(pr.User?.Login, username, StringComparison.OrdinalIgnoreCase))
                 .Select(pr => new DraftPullRequest
@@ -866,7 +815,6 @@ public class PerformanceService : IPerformanceService
                 return commits;
             }
 
-            // Get authenticated user
             var userResponse = await _gitHubClient.GetAsync("user");
             if (!userResponse.IsSuccessStatusCode)
             {
@@ -921,19 +869,15 @@ public class PerformanceService : IPerformanceService
     {
         try
         {
-            // Get the access token from the Graph configuration
-            // In production, this should use managed identity or OAuth flow
             var graphToken = _configuration["MicrosoftGraph:AccessToken"];
 
             if (string.IsNullOrEmpty(graphToken))
             {
-                // Return a deep link URL for client-side meeting creation
                 return CreateTeamsMeetingDeepLink(request);
             }
 
             _graphClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", graphToken);
 
-            // Build attendee list from reviewers
             var attendees = request.Reviewers?
                 .Where(r => !string.IsNullOrEmpty(r.Email))
                 .Select(r => (object)new
@@ -943,7 +887,6 @@ public class PerformanceService : IPerformanceService
                 })
                 .ToList() ?? new List<object>();
 
-            // Build meeting body with PR link
             var meetingBody = $@"
 Code Review Meeting for PR #{request.PrId}
 
@@ -1004,7 +947,6 @@ Scheduled via DevDash";
             var user = await GetAuthenticatedAzDoUserAsync();
             var project = _configuration["AzureDevOps:Project"];
 
-            // Get all teams in the project
             var teamsResponse = await _azDoClient.GetAsync($"_apis/projects/{project}/teams?api-version=7.0");
             if (!teamsResponse.IsSuccessStatusCode)
             {
@@ -1015,7 +957,6 @@ Scheduled via DevDash";
             var teamsResult = await teamsResponse.Content.ReadFromJsonAsync<TeamsListResponse>();
             var teams = teamsResult?.Value ?? new List<TeamInfo>();
 
-            // Find which team the user belongs to
             foreach (var team in teams)
             {
                 var membersResponse = await _azDoClient.GetAsync(
@@ -1027,7 +968,6 @@ Scheduled via DevDash";
                 var membersResult = await membersResponse.Content.ReadFromJsonAsync<TeamMembersListResponse>();
                 var members = membersResult?.Value ?? new List<TeamMemberItem>();
 
-                // Check if current user is in this team
                 var userMember = members.FirstOrDefault(m =>
                     string.Equals(m.Identity?.Id, user.Id, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(m.Identity?.UniqueName, user.Email, StringComparison.OrdinalIgnoreCase) ||
@@ -1057,7 +997,6 @@ Scheduled via DevDash";
                 }
             }
 
-            // If not found in any team, return the default team with all members
             var defaultTeam = teams.FirstOrDefault();
             if (defaultTeam != null)
             {
@@ -1098,9 +1037,6 @@ Scheduled via DevDash";
         }
     }
 
-    /// <summary>
-    /// Check if a unique name represents a group (not a user)
-    /// </summary>
     private static bool IsGroupIdentity(string? uniqueName)
     {
         if (string.IsNullOrWhiteSpace(uniqueName))
@@ -1154,7 +1090,6 @@ Scheduled via DevDash";
         var body = Uri.EscapeDataString($"Code review for: {request.PrTitle}\nPR Link: {request.PrUrl}");
         var attendees = string.Join(",", request.Reviewers?.Select(r => r.Email).Where(e => !string.IsNullOrEmpty(e)) ?? Array.Empty<string>());
 
-        // Teams deep link for creating a new meeting
         var teamsUrl = $"https://teams.microsoft.com/l/meeting/new?subject={subject}&content={body}";
 
         if (!string.IsNullOrEmpty(attendees))
@@ -1334,10 +1269,6 @@ Scheduled via DevDash";
         [JsonPropertyName("System.WorkItemType")]
         public string? WorkItemType { get; set; }
 
-        /// <summary>
-        /// Gets the effective points value - uses Effort if StoryPoints is 0
-        /// This handles both Scrum (StoryPoints) and Agile/CMMI (Effort) templates
-        /// </summary>
         public double EffectivePoints => StoryPoints > 0 ? StoryPoints : Effort;
     }
 
