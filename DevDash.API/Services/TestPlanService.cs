@@ -303,7 +303,7 @@ public class TestPlanService : ITestPlanService
 
     private async Task<List<AzDoTestPoint>> GetAllTestPointsForPlanAsync(string project, int planId)
     {
-        var allPoints = new List<AzDoTestPoint>();
+        var allPoints = new Dictionary<int, AzDoTestPoint>();
 
         try
         {
@@ -311,20 +311,27 @@ public class TestPlanService : ITestPlanService
             var suites = await GetAllSuitesForPlanAsync(project, planId);
             _logger.LogInformation("Found {SuiteCount} suites for plan {PlanId}", suites.Count, planId);
 
-            // Get test points from each suite
+            // Get test points from each suite, deduplicating by test point ID
             foreach (var suite in suites)
             {
                 var suitePoints = await GetTestPointsForSuiteAsync(project, planId, suite.Id, suite.Name);
-                allPoints.AddRange(suitePoints);
+                foreach (var point in suitePoints)
+                {
+                    // Only add if not already seen (avoid duplicates from hierarchical suites)
+                    if (!allPoints.ContainsKey(point.Id))
+                    {
+                        allPoints[point.Id] = point;
+                    }
+                }
             }
 
-            _logger.LogInformation("Total test points for plan {PlanId}: {PointCount}", planId, allPoints.Count);
-            return allPoints;
+            _logger.LogInformation("Total unique test points for plan {PlanId}: {PointCount}", planId, allPoints.Count);
+            return allPoints.Values.ToList();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to fetch all test points for plan {PlanId}", planId);
-            return allPoints;
+            return allPoints.Values.ToList();
         }
     }
 
