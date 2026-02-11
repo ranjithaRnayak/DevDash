@@ -579,35 +579,69 @@ public class PerformanceService : IPerformanceService
         {
             var user = await GetAuthenticatedAzDoUserAsync();
             var project = _configuration["AzureDevOps:Project"];
+            var team = _configuration["AzureDevOps:Team"] ?? $"{project} Team";
+
+            _logger.LogInformation("Fetching story points for user: {Email}, Project: {Project}, Team: {Team}",
+                user.Email, project, team);
+
+            // Build the user filter - try email first, then display name
+            var userFilter = !string.IsNullOrEmpty(user.Email) ? user.Email : user.DisplayName;
 
             // WIQL query for PBIs/User Stories only (exclude Tasks)
             // Filter for items assigned to current user, in current sprint, not started
+            // States: New, To Do, Approved, Committed are typically "not started" states
+            // Exclude: Active, In Progress, Analysis, Doing, Resolved, Done, Closed, Removed
             var wiqlQuery = new
             {
                 query = $@"
                     SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.WorkItemType]
                     FROM WorkItems
                     WHERE [System.TeamProject] = '{project}'
-                    AND [System.AssignedTo] = '{user.Email}'
-                    AND [System.WorkItemType] IN ('Product Backlog Item', 'User Story')
-                    AND [System.IterationPath] UNDER @CurrentIteration
-                    AND [System.State] NOT IN ('Done', 'Closed', 'Removed')
-                    AND [System.State] IN ('New', 'To Do', 'Approved', 'Committed')
+                    AND [System.AssignedTo] = '{userFilter}'
+                    AND [System.WorkItemType] IN ('Product Backlog Item', 'User Story', 'Bug')
+                    AND [System.IterationPath] UNDER @CurrentIteration('[{project}]\\{team}')
+                    AND [System.State] NOT IN ('Active', 'In Progress', 'Analysis', 'Doing', 'Resolved', 'Done', 'Closed', 'Removed')
                     ORDER BY [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
             };
 
+            _logger.LogDebug("WIQL Query: {Query}", wiqlQuery.query);
+
+            // Use team in the WIQL endpoint for @CurrentIteration macro to work
             var wiqlResponse = await _azDoClient.PostAsJsonAsync(
-                $"{project}/_apis/wit/wiql?api-version=7.0",
+                $"{project}/{team}/_apis/wit/wiql?api-version=7.0",
                 wiqlQuery);
 
             if (!wiqlResponse.IsSuccessStatusCode)
             {
-                _logger.LogWarning("WIQL query failed: {Status}", wiqlResponse.StatusCode);
-                return new StoryPointsSummary();
+                var errorContent = await wiqlResponse.Content.ReadAsStringAsync();
+                _logger.LogWarning("WIQL query failed: {Status}, Error: {Error}", wiqlResponse.StatusCode, errorContent);
+
+                // Fallback: Try without team context in case team name doesn't match
+                wiqlResponse = await _azDoClient.PostAsJsonAsync(
+                    $"{project}/_apis/wit/wiql?api-version=7.0",
+                    new
+                    {
+                        query = $@"
+                            SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.WorkItemType]
+                            FROM WorkItems
+                            WHERE [System.TeamProject] = '{project}'
+                            AND [System.AssignedTo] = '{userFilter}'
+                            AND [System.WorkItemType] IN ('Product Backlog Item', 'User Story', 'Bug')
+                            AND [System.State] NOT IN ('Active', 'In Progress', 'Analysis', 'Doing', 'Resolved', 'Done', 'Closed', 'Removed')
+                            ORDER BY [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
+                    });
+
+                if (!wiqlResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("Fallback WIQL query also failed: {Status}", wiqlResponse.StatusCode);
+                    return new StoryPointsSummary();
+                }
             }
 
             var wiqlResult = await wiqlResponse.Content.ReadFromJsonAsync<WiqlResponse>();
             var workItemIds = wiqlResult?.WorkItems?.Select(wi => wi.Id).ToList() ?? new List<int>();
+
+            _logger.LogInformation("WIQL returned {Count} work items", workItemIds.Count);
 
             if (workItemIds.Count == 0)
             {
@@ -621,6 +655,7 @@ public class PerformanceService : IPerformanceService
 
             if (!detailsResponse.IsSuccessStatusCode)
             {
+                _logger.LogWarning("Work item details fetch failed: {Status}", detailsResponse.StatusCode);
                 return new StoryPointsSummary();
             }
 
@@ -640,6 +675,8 @@ public class PerformanceService : IPerformanceService
 
             // Sum story points (treat null as 0)
             var totalPoints = items.Sum(i => i.StoryPoints);
+
+            _logger.LogInformation("Returning {Count} items with {Points} total story points", items.Count, totalPoints);
 
             return new StoryPointsSummary
             {
