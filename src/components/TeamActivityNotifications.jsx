@@ -2,8 +2,9 @@ import { useEffect, useRef, useCallback } from 'react';
 import { devOpsAPI } from '../api/backendClient';
 import { useToast } from './Toast';
 
-const POLL_INTERVAL = 60000;
+const POLL_INTERVAL = 30000; // 30 seconds for more timely notifications
 const DISMISSED_KEY = 'devdash_dismissed_activities';
+const INITIAL_LOAD_WINDOW = 5 * 60 * 1000; // Show toasts for activities from last 5 minutes on initial load
 
 function getDismissedActivities() {
   try {
@@ -50,7 +51,12 @@ export default function TeamActivityNotifications() {
 
         seenActivitiesRef.current.add(activity.id);
 
-        if (!initialFetchDoneRef.current) continue;
+        // On initial load, only show toasts for very recent activities (last 5 min)
+        // to avoid spamming with old notifications
+        if (!initialFetchDoneRef.current) {
+          const activityAge = Date.now() - new Date(activity.timestamp).getTime();
+          if (activityAge > INITIAL_LOAD_WINDOW) continue;
+        }
 
         const typeLabels = {
           PRCreated: 'New PR',
