@@ -1854,6 +1854,21 @@ input:checked + .slider {
     background: rgba(255, 255, 255, 0.03);
     border-radius: 6px;
     margin-top: 8px;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.suite-item.clickable:hover {
+    background: rgba(255, 255, 255, 0.08);
+    transform: translateX(2px);
+}
+
+.suite-item .external-link-icon {
+    opacity: 0.5;
+    transition: opacity 0.2s ease;
+}
+
+.suite-item.clickable:hover .external-link-icon {
+    opacity: 1;
 }
 
 .suite-info {

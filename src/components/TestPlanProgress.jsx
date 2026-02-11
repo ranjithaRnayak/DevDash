@@ -236,23 +236,29 @@ const TestPlanProgress = () => {
                         {expandedPlans[plan.id] && (
                             <div className="suites-list">
                                 {plan.suites.map((suite) => (
-                                    <div key={suite.id} className="suite-item">
+                                    <div
+                                        key={suite.id}
+                                        className={`suite-item ${suite.url ? 'clickable' : ''}`}
+                                        onClick={() => suite.url && window.open(suite.url, '_blank')}
+                                        style={{ cursor: suite.url ? 'pointer' : 'default' }}
+                                        title={suite.url ? 'Click to open in Azure DevOps' : ''}
+                                    >
                                         <div className="suite-info">
                                             <span className="suite-name">{suite.name}</span>
                                             {suite.url && (
-                                                <a
-                                                    href={suite.url}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="suite-link"
-                                                    title="Open suite"
+                                                <svg
+                                                    className="external-link-icon"
+                                                    width="12"
+                                                    height="12"
+                                                    viewBox="0 0 24 24"
+                                                    fill="none"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2"
                                                 >
-                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-                                                        <polyline points="15 3 21 3 21 9"></polyline>
-                                                        <line x1="10" y1="14" x2="21" y2="3"></line>
-                                                    </svg>
-                                                </a>
+                                                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                                    <polyline points="15 3 21 3 21 9"></polyline>
+                                                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                                                </svg>
                                             )}
                                         </div>
                                         <div className="suite-stats">
