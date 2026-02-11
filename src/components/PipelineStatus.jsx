@@ -15,7 +15,8 @@ const PipelineStatus = ({ dashboardId, pipelines }) => {
             setLoading(true);
             setError(null);
             try {
-                const response = await devOpsAPI.getBuilds(20);
+                // Pass dashboardId as environment to filter by configured pipelines
+                const response = await devOpsAPI.getBuilds(20, dashboardId);
                 setBuilds(response.data || []);
             } catch (err) {
                 console.error('Failed to fetch pipeline builds:', err);
@@ -27,7 +28,7 @@ const PipelineStatus = ({ dashboardId, pipelines }) => {
         };
 
         fetchBuilds();
-    }, []);
+    }, [dashboardId]);
 
     const getStatusClass = (result) => {
         switch (result?.toLowerCase()) {

@@ -18,6 +18,7 @@ public interface IPerformanceService
     Task<List<DraftPullRequest>> GetGitHubDraftPRsAsync();
     Task<List<RecentCommit>> GetGitHubCommitsAsync(int days = 7);
     Task<TeamsMeetingResult> CreateCodeReviewMeetingAsync(CodeReviewMeetingRequest request);
+    Task<UserTeamInfo> GetMyTeamAsync();
 }
 
 /// <summary>
@@ -95,6 +96,7 @@ public class PerformanceService : IPerformanceService
         var cached = await _cacheService.GetAsync<AzDoUserInfo>(cacheKey);
         if (cached != null)
         {
+            _logger.LogInformation("Returning cached user: {UserId}, {Email}", cached.Id, cached.Email);
             return cached;
         }
 
@@ -110,10 +112,21 @@ public class PerformanceService : IPerformanceService
                 return GetFallbackUser();
             }
 
+            _logger.LogInformation("Fetching authenticated user from: {BaseAddress}_apis/connectionData", _azDoClient.BaseAddress);
             var response = await _azDoClient.GetAsync("_apis/connectionData?api-version=7.0");
-            response.EnsureSuccessStatusCode();
 
-            var data = await response.Content.ReadFromJsonAsync<ConnectionDataResponse>();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("ConnectionData API returned {StatusCode}", response.StatusCode);
+                return GetFallbackUser();
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            _logger.LogInformation("ConnectionData response (first 500 chars): {Content}",
+                content.Length > 500 ? content.Substring(0, 500) : content);
+
+            var data = System.Text.Json.JsonSerializer.Deserialize<ConnectionDataResponse>(content,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (data?.AuthenticatedUser == null)
             {
@@ -124,10 +137,13 @@ public class PerformanceService : IPerformanceService
             var userInfo = new AzDoUserInfo
             {
                 Id = data.AuthenticatedUser.Id,
-                DisplayName = data.AuthenticatedUser.ProviderDisplayName ?? data.AuthenticatedUser.DisplayName,
-                Email = data.AuthenticatedUser.Properties?.Account?.FirstOrDefault() ?? "",
+                DisplayName = data.AuthenticatedUser.ProviderDisplayName ?? data.AuthenticatedUser.DisplayName ?? "",
+                Email = data.AuthenticatedUser.Properties?.Account?.FirstOrDefault() ?? data.AuthenticatedUser.UniqueName ?? "",
                 UniqueName = data.AuthenticatedUser.UniqueName ?? ""
             };
+
+            _logger.LogInformation("Resolved authenticated user: {UserId}, {DisplayName}, {Email}",
+                userInfo.Id, userInfo.DisplayName, userInfo.Email);
 
             // Cache for 30 minutes
             await _cacheService.SetAsync(cacheKey, userInfo, TimeSpan.FromMinutes(30));
@@ -615,6 +631,125 @@ Scheduled via DevDash";
         }
     }
 
+    /// <summary>
+    /// Get the current user's team and team members
+    /// </summary>
+    public async Task<UserTeamInfo> GetMyTeamAsync()
+    {
+        try
+        {
+            var user = await GetAuthenticatedAzDoUserAsync();
+            var project = _configuration["AzureDevOps:Project"];
+
+            // Get all teams in the project
+            var teamsResponse = await _azDoClient.GetAsync($"_apis/projects/{project}/teams?api-version=7.0");
+            if (!teamsResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch teams: {StatusCode}", teamsResponse.StatusCode);
+                return new UserTeamInfo();
+            }
+
+            var teamsResult = await teamsResponse.Content.ReadFromJsonAsync<TeamsListResponse>();
+            var teams = teamsResult?.Value ?? new List<TeamInfo>();
+
+            // Find which team the user belongs to
+            foreach (var team in teams)
+            {
+                var membersResponse = await _azDoClient.GetAsync(
+                    $"_apis/projects/{project}/teams/{team.Id}/members?api-version=7.0");
+
+                if (!membersResponse.IsSuccessStatusCode)
+                    continue;
+
+                var membersResult = await membersResponse.Content.ReadFromJsonAsync<TeamMembersListResponse>();
+                var members = membersResult?.Value ?? new List<TeamMemberItem>();
+
+                // Check if current user is in this team
+                var userMember = members.FirstOrDefault(m =>
+                    string.Equals(m.Identity?.Id, user.Id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.Identity?.UniqueName, user.Email, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.Identity?.UniqueName, user.UniqueName, StringComparison.OrdinalIgnoreCase));
+
+                if (userMember != null)
+                {
+                    _logger.LogInformation("Found user {UserId} in team {TeamName}", user.Id, team.Name);
+
+                    return new UserTeamInfo
+                    {
+                        TeamId = team.Id ?? "",
+                        TeamName = team.Name ?? "",
+                        TeamDescription = team.Description ?? "",
+                        Members = members
+                            .Where(m => !IsGroupIdentity(m.Identity?.UniqueName))
+                            .Select(m => new TeamMemberDetails
+                            {
+                                Id = m.Identity?.Id ?? "",
+                                DisplayName = m.Identity?.DisplayName ?? "",
+                                Email = m.Identity?.UniqueName ?? "",
+                                AvatarUrl = m.Identity?.ImageUrl,
+                                IsCurrentUser = string.Equals(m.Identity?.Id, user.Id, StringComparison.OrdinalIgnoreCase)
+                            })
+                            .ToList()
+                    };
+                }
+            }
+
+            // If not found in any team, return the default team with all members
+            var defaultTeam = teams.FirstOrDefault();
+            if (defaultTeam != null)
+            {
+                var defaultMembersResponse = await _azDoClient.GetAsync(
+                    $"_apis/projects/{project}/teams/{defaultTeam.Id}/members?api-version=7.0");
+
+                if (defaultMembersResponse.IsSuccessStatusCode)
+                {
+                    var defaultMembersResult = await defaultMembersResponse.Content.ReadFromJsonAsync<TeamMembersListResponse>();
+                    var defaultMembers = defaultMembersResult?.Value ?? new List<TeamMemberItem>();
+
+                    return new UserTeamInfo
+                    {
+                        TeamId = defaultTeam.Id ?? "",
+                        TeamName = defaultTeam.Name ?? "",
+                        TeamDescription = defaultTeam.Description ?? "",
+                        Members = defaultMembers
+                            .Where(m => !IsGroupIdentity(m.Identity?.UniqueName))
+                            .Select(m => new TeamMemberDetails
+                            {
+                                Id = m.Identity?.Id ?? "",
+                                DisplayName = m.Identity?.DisplayName ?? "",
+                                Email = m.Identity?.UniqueName ?? "",
+                                AvatarUrl = m.Identity?.ImageUrl,
+                                IsCurrentUser = string.Equals(m.Identity?.Id, user.Id, StringComparison.OrdinalIgnoreCase)
+                            })
+                            .ToList()
+                    };
+                }
+            }
+
+            return new UserTeamInfo();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get user's team");
+            return new UserTeamInfo();
+        }
+    }
+
+    /// <summary>
+    /// Check if a unique name represents a group (not a user)
+    /// </summary>
+    private static bool IsGroupIdentity(string? uniqueName)
+    {
+        if (string.IsNullOrWhiteSpace(uniqueName))
+            return true;
+
+        return uniqueName.Contains("///Classification") ||
+               uniqueName.Contains("TeamProject") ||
+               uniqueName.Contains("VSTFS:") ||
+               uniqueName.StartsWith("///") ||
+               uniqueName.StartsWith("[");
+    }
+
     #region Helper Methods
 
     private async Task<string[]> GetProjectRepositoriesAsync(string? project)
@@ -757,6 +892,36 @@ Scheduled via DevDash";
     {
         public string? Id { get; set; }
         public string? Name { get; set; }
+    }
+
+    private class TeamsListResponse
+    {
+        public List<TeamInfo>? Value { get; set; }
+    }
+
+    private class TeamInfo
+    {
+        public string? Id { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+    }
+
+    private class TeamMembersListResponse
+    {
+        public List<TeamMemberItem>? Value { get; set; }
+    }
+
+    private class TeamMemberItem
+    {
+        public TeamMemberIdentity? Identity { get; set; }
+    }
+
+    private class TeamMemberIdentity
+    {
+        public string? Id { get; set; }
+        public string? DisplayName { get; set; }
+        public string? UniqueName { get; set; }
+        public string? ImageUrl { get; set; }
     }
 
     private class WiqlResponse
@@ -946,6 +1111,23 @@ public class TeamsMeetingResult
     public string? WebLink { get; set; }
     public bool IsDeepLink { get; set; }
     public string? Error { get; set; }
+}
+
+public class UserTeamInfo
+{
+    public string TeamId { get; set; } = "";
+    public string TeamName { get; set; } = "";
+    public string TeamDescription { get; set; } = "";
+    public List<TeamMemberDetails> Members { get; set; } = new();
+}
+
+public class TeamMemberDetails
+{
+    public string Id { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Email { get; set; } = "";
+    public string? AvatarUrl { get; set; }
+    public bool IsCurrentUser { get; set; }
 }
 
 #endregion

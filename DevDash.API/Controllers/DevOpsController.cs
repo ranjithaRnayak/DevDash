@@ -85,11 +85,13 @@ public class DevOpsController : ControllerBase
     /// Get recent pipeline builds
     /// </summary>
     [HttpGet("builds")]
-    public async Task<ActionResult<List<PipelineBuild>>> GetBuilds([FromQuery] int count = 10)
+    public async Task<ActionResult<List<PipelineBuild>>> GetBuilds(
+        [FromQuery] int count = 10,
+        [FromQuery] string? environment = null)
     {
         try
         {
-            var builds = await _devOpsService.GetRecentBuildsAsync(count);
+            var builds = await _devOpsService.GetRecentBuildsAsync(count, environment);
             return Ok(builds);
         }
         catch (Exception ex)

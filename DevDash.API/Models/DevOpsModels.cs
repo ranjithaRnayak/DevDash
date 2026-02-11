@@ -8,7 +8,7 @@ public class PipelineBuild
     public string Id { get; set; } = string.Empty;
     public string PipelineName { get; set; } = string.Empty;
     public string PipelineId { get; set; } = string.Empty;
-    public int BuildNumber { get; set; }
+    public string? BuildNumber { get; set; }
     public BuildStatus Status { get; set; }
     public BuildResult? Result { get; set; }
     public string? SourceBranch { get; set; }

@@ -62,7 +62,8 @@ export const aiAPI = {
 
 export const devOpsAPI = {
   getDashboard: () => apiClient.get('/devops/dashboard'),
-  getBuilds: (count = 10) => apiClient.get(`/devops/builds?count=${count}`),
+  getBuilds: (count = 10, environment = null) =>
+    apiClient.get(`/devops/builds?count=${count}${environment ? `&environment=${environment}` : ''}`),
   getBuild: (buildId) => apiClient.get(`/devops/builds/${buildId}`),
   getBuildLogs: (buildId) => apiClient.get(`/devops/builds/${buildId}/logs`),
   getPullRequests: (status) =>
