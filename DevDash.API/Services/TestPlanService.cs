@@ -40,11 +40,27 @@ public class TestPlanService : ITestPlanService
     {
         var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
         var pat = _configuration["AzureDevOps:PAT"];
+        var project = _configuration["AzureDevOps:Project"];
+        var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
 
-        if (!string.IsNullOrEmpty(orgUrl))
+        _logger.LogInformation("TestPlanService initialized - OrgUrl: {OrgUrl}, Project: {Project}, PAT configured: {HasPAT}, Plans configured: {PlanCount}",
+            orgUrl ?? "NOT SET",
+            project ?? "NOT SET",
+            !string.IsNullOrEmpty(pat),
+            plansConfig.Count);
+
+        if (string.IsNullOrEmpty(orgUrl))
         {
-            _httpClient.BaseAddress = new Uri(orgUrl);
+            _logger.LogWarning("AzureDevOps:OrganizationUrl is not configured");
+            return;
         }
+
+        if (string.IsNullOrEmpty(pat))
+        {
+            _logger.LogWarning("AzureDevOps:PAT is not configured - API calls will fail");
+        }
+
+        _httpClient.BaseAddress = new Uri(orgUrl);
 
         if (!string.IsNullOrEmpty(pat))
         {
@@ -56,11 +72,14 @@ public class TestPlanService : ITestPlanService
 
     public async Task<TestPlanProgress> GetTestPlanProgressAsync()
     {
+        _logger.LogInformation("GetTestPlanProgressAsync called");
+
         var cacheDuration = _configuration.GetValue<int>("TestPlans:CacheDurationMinutes", 5);
         var cacheKey = "testplans:progress";
         var cached = await _cacheService.GetAsync<TestPlanProgress>(cacheKey);
         if (cached != null)
         {
+            _logger.LogInformation("Returning cached test plan progress");
             return cached;
         }
 
@@ -69,6 +88,9 @@ public class TestPlanService : ITestPlanService
             var project = _configuration["AzureDevOps:Project"];
             var orgUrl = _configuration["AzureDevOps:OrganizationUrl"]?.TrimEnd('/');
             var plansConfig = _configuration.GetSection("TestPlans:Plans").Get<List<TestPlanConfig>>() ?? new List<TestPlanConfig>();
+
+            _logger.LogInformation("Fetching test plan progress - Project: {Project}, PlansConfigured: {Count}",
+                project ?? "NOT SET", plansConfig.Count);
 
             if (plansConfig.Count == 0)
             {

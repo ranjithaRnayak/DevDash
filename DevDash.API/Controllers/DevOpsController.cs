@@ -338,9 +338,12 @@ public class DevOpsController : ControllerBase
     [HttpGet("testplans/progress")]
     public async Task<ActionResult<TestPlanProgress>> GetTestPlanProgress()
     {
+        _logger.LogInformation("GetTestPlanProgress endpoint called");
         try
         {
             var progress = await _testPlanService.GetTestPlanProgressAsync();
+            _logger.LogInformation("Test plan progress fetched: {PlanCount} plans, {TotalTests} total tests",
+                progress.Plans.Count, progress.TotalTestCases);
             return Ok(progress);
         }
         catch (Exception ex)

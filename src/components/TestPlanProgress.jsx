@@ -13,12 +13,15 @@ const TestPlanProgress = () => {
         hasFetched.current = true;
 
         const fetchTestPlanProgress = async () => {
+            console.log('[TestPlanProgress] Fetching test plan progress...');
             setLoading(true);
             try {
                 const response = await devOpsAPI.getTestPlanProgress();
+                console.log('[TestPlanProgress] API response:', response.data);
                 setProgress(response.data);
             } catch (err) {
-                console.error('Failed to fetch test plan progress:', err);
+                console.error('[TestPlanProgress] Failed to fetch test plan progress:', err);
+                console.error('[TestPlanProgress] Error details:', err.response?.status, err.response?.data);
                 setError('Failed to load test plan progress');
             } finally {
                 setLoading(false);
