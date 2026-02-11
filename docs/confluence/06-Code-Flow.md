@@ -144,32 +144,42 @@ App.jsx
 **Why Needed:**
 - Quick visibility into CI/CD health
 - Identify failing builds immediately
-- Click to navigate to build details
+- Click to navigate directly to build in Azure DevOps
 
 **Data Flow:**
 ```
 PipelineStatus.jsx
     └── useEffect (on mount)
-        └── devOpsAPI.getBuilds(20)
+        └── devOpsAPI.getBuilds(20, environment)
             └── backendClient.js
-                └── /api/devops/builds
+                └── /api/devops/builds?environment={Dev|Test}
                     └── DevOpsController
-                        └── DevOpsService
+                        └── DevOpsService.GetRecentBuildsAsync()
                             └── Azure DevOps API
+                                └── Returns builds with _links.web.href URLs
 ```
+
+**Key Features:**
+- **Clickable Rows:** Each build row links directly to Azure DevOps build page
+- **Environment Filtering:** Dev dashboard shows Dev pipelines, Test shows Test pipelines
+- **Build URL Mapping:** Uses `[JsonPropertyName("_links")]` to correctly map Azure DevOps URL structure
 
 **Key Code:**
 ```jsx
 const PipelineStatus = () => {
     const [builds, setBuilds] = useState([]);
-    const hasFetched = useRef(false);  // Prevent duplicate calls
+    const hasFetched = useRef(false);
+
+    const handleRowClick = (url) => {
+        if (url) window.open(url, '_blank');
+    };
 
     useEffect(() => {
         if (hasFetched.current) return;
         hasFetched.current = true;
 
         const fetchBuilds = async () => {
-            const response = await devOpsAPI.getBuilds(20);
+            const response = await devOpsAPI.getBuilds(20, dashboardId);
             setBuilds(response.data || []);
         };
         fetchBuilds();
@@ -259,7 +269,7 @@ CodeQuality.jsx
 **Tabs:**
 1. **Draft PRs** - Your PRs in draft status
 2. **Recent Check-ins** - Your recent commits
-3. **Backlog** - Story points assigned to you
+3. **Backlog** - Story points/Effort assigned to you
 
 **Data Flow:**
 ```
@@ -267,10 +277,22 @@ PerformanceCard.jsx
     └── performanceAPI.getDashboard()
         └── PerformanceController
             └── PerformanceService
-                ├── User's draft PRs
-                ├── User's commits
-                └── User's work items
+                ├── GetAuthenticatedAzDoUserAsync()
+                │   ├── PAT Mode: connectionData API → Profile API
+                │   └── Entra ID Mode: HTTP context claims
+                ├── GetMyDraftPRsAsync() → User's draft PRs
+                ├── GetMyRecentCommitsAsync() → User's commits
+                └── GetMyStoryPointsAsync()
+                    ├── GetUserTeamNameAsync() → Resolve team for @CurrentIteration
+                    └── WIQL query with @Me macro
+                        └── Returns both StoryPoints and Effort fields
 ```
+
+**Key Features:**
+- **Dual Authentication:** Supports PAT token mode and Entra ID mode
+- **Team Resolution:** Dynamically resolves user's team for sprint filtering
+- **Story Points + Effort:** Supports both Scrum (StoryPoints) and Agile/CMMI (Effort) templates
+- **User Filtering:** Uses @Me WIQL macro for accurate user matching
 
 ---
 
@@ -488,6 +510,46 @@ Instead of conditionally rendering dashboards (which causes unmount/remount), bo
 
 ## Backend Service Layer
 
+### Dual Authentication System
+
+PerformanceService supports two authentication modes:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   AUTHENTICATION FLOW                            │
+│                                                                  │
+│  GetAuthenticatedAzDoUserAsync()                                │
+│      │                                                          │
+│      ├── Check FeatureFlags:UsePATToken                         │
+│      │                                                          │
+│      ├── Entra ID Mode (UsePATToken: false)                     │
+│      │   └── GetUserFromEntraIdClaimsAsync()                    │
+│      │       └── Extract from HTTP context claims:              │
+│      │           - oid (Object ID)                              │
+│      │           - email / preferred_username                   │
+│      │           - name                                         │
+│      │                                                          │
+│      └── PAT Mode (UsePATToken: true)                           │
+│          └── GetUserFromAzureDevOpsApiAsync()                   │
+│              ├── TryGetUserFromConnectionDataAsync()            │
+│              │   └── GET /_apis/connectionData                  │
+│              │                                                  │
+│              └── TryGetUserFromProfileApiAsync() (fallback)     │
+│                  └── GET vssps.dev.azure.com/{org}/profiles/me  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Team Resolution for Sprint Filtering
+
+```
+GetUserTeamNameAsync(user)
+    └── GET /_apis/projects/{project}/teams
+        └── For each team:
+            └── GET /_apis/projects/{project}/teams/{teamId}/members
+                └── Match user by ID, Email, or UniqueName
+                    └── Return team name for @CurrentIteration macro
+```
+
 ### Why Service Layer Pattern
 
 ```
@@ -559,11 +621,14 @@ DevDash/
 └── DevDash.API/
     ├── Controllers/
     │   ├── DevOpsController.cs
+    │   ├── PerformanceController.cs
     │   ├── SonarQubeController.cs
     │   └── AIController.cs
     ├── Services/
-    │   ├── DevOpsService.cs
+    │   ├── DevOpsService.cs       # Azure DevOps & GitHub integration
+    │   ├── PerformanceService.cs  # User-specific metrics (dual auth)
     │   ├── SonarQubeService.cs
+    │   ├── CacheService.cs        # In-memory/Redis caching
     │   └── AIService.cs
     └── Middleware/
         └── RateLimitingMiddleware.cs

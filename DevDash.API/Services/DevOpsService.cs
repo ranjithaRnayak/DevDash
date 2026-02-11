@@ -83,7 +83,6 @@ public class AzureDevOpsService : IDevOpsService
         {
             var project = _configuration["AzureDevOps:Project"];
 
-            // Get configured pipeline names for the environment (Dev, Test, etc.)
             var pipelineNames = new List<string>();
             if (!string.IsNullOrEmpty(environment))
             {
@@ -94,7 +93,6 @@ public class AzureDevOpsService : IDevOpsService
                 }
             }
 
-            // Fetch more builds to account for filtering (3x the requested count)
             var fetchCount = pipelineNames.Count > 0 ? count * 3 : count;
             var url = $"{project}/_apis/build/builds?$top={fetchCount}&api-version=7.0";
             _logger.LogInformation("Builds API: BaseAddress={BaseAddress}, URL={Url}, Environment={Env}, Pipelines={Pipelines}",
@@ -111,7 +109,6 @@ public class AzureDevOpsService : IDevOpsService
 
             var allBuilds = result?.Value?.Select(MapToPipelineBuild).ToList() ?? new List<PipelineBuild>();
 
-            // Filter by configured pipeline names if environment is specified
             List<PipelineBuild> builds;
             if (pipelineNames.Count > 0)
             {
@@ -228,7 +225,6 @@ public class AzureDevOpsService : IDevOpsService
         {
             var project = _configuration["AzureDevOps:Project"];
 
-            // First, get the default team for the project
             var teamsResponse = await _httpClient.GetAsync($"{project}/_apis/teams?api-version=7.0");
             if (!teamsResponse.IsSuccessStatusCode)
             {
@@ -245,7 +241,6 @@ public class AzureDevOpsService : IDevOpsService
                 return new List<TeamMember>();
             }
 
-            // Get team members
             var membersResponse = await _httpClient.GetAsync(
                 $"{project}/_apis/projects/{project}/teams/{defaultTeam.Id}/members?api-version=7.0");
 
@@ -257,8 +252,6 @@ public class AzureDevOpsService : IDevOpsService
 
             var membersResult = await membersResponse.Content.ReadFromJsonAsync<AzDoTeamMembersResponse>();
 
-            // Filter out groups - only include actual users with valid email addresses
-            // Groups have patterns like: "///Classification/TeamProject/...", "VSTFS:///...", "[VSTFS:...]"
             var members = membersResult?.Value?
                 .Where(m => IsValidUserEmail(m.Identity?.UniqueName))
                 .Select(m => new TeamMember
@@ -306,12 +299,10 @@ public class AzureDevOpsService : IDevOpsService
         var projectName = pr.Repository?.Project?.Name ?? _configuration["AzureDevOps:Project"];
         var repoName = pr.Repository?.Name ?? "";
 
-        // Construct proper web URL for Azure DevOps PR
         var webUrl = !string.IsNullOrEmpty(orgUrl) && !string.IsNullOrEmpty(projectName) && !string.IsNullOrEmpty(repoName)
             ? $"{orgUrl}/{projectName}/_git/{repoName}/pullrequest/{pr.PullRequestId}"
             : null;
 
-        // Map reviewers with email information - filter out groups (only include actual users)
         var reviewers = pr.Reviewers?
             .Where(r => IsValidUserEmail(r.UniqueName))
             .Select(r => new PRReviewer
@@ -365,7 +356,6 @@ public class AzureDevOpsService : IDevOpsService
 
     /// <summary>
     /// Checks if a UniqueName is a valid user email address (not a group identifier)
-    /// Azure DevOps groups have patterns like: "///Classification/TeamProject/...", "VSTFS:///...", "[VSTFS:...]"
     /// </summary>
     private static bool IsValidUserEmail(string? uniqueName)
     {
@@ -374,11 +364,9 @@ public class AzureDevOpsService : IDevOpsService
 
         var trimmed = uniqueName.Trim();
 
-        // Must contain @ to be a valid email
         if (!trimmed.Contains('@'))
             return false;
 
-        // Filter out Azure DevOps group identifiers
         if (trimmed.Contains("///Classification") ||
             trimmed.Contains("TeamProject") ||
             trimmed.Contains("VSTFS:") ||
@@ -417,7 +405,8 @@ public class AzureDevOpsService : IDevOpsService
         _ => PRStatus.Open
     };
 
-    // Azure DevOps API response models
+    #region Response Models
+
     private class AzDoBuildsResponse { public List<AzDoBuild>? Value { get; set; } }
     private class AzDoPRsResponse { public List<AzDoPR>? Value { get; set; } }
     private class AzDoTeamsResponse { public List<AzDoTeam>? Value { get; set; } }
@@ -452,6 +441,7 @@ public class AzureDevOpsService : IDevOpsService
     }
 
     private class AzDoDefinition { public int Id { get; set; } public string? Name { get; set; } }
+
     private class AzDoIdentity
     {
         public string? DisplayName { get; set; }
@@ -510,6 +500,8 @@ public class AzureDevOpsService : IDevOpsService
         public string? Id { get; set; }
         public string? Name { get; set; }
     }
+
+    #endregion
 }
 
 /// <summary>
@@ -532,7 +524,6 @@ public class GitHubService : IGitHubService
         _configuration = configuration;
         _cacheService = cacheService;
         _logger = logger;
-        // HttpClient is configured in Program.cs via AddHttpClient
     }
 
     public async Task<List<PullRequest>> GetPullRequestsAsync(string state = "open")
@@ -548,8 +539,6 @@ public class GitHubService : IGitHubService
         {
             var owner = _configuration["GitHub:Owner"];
 
-            // Support multiple repos from configuration (comma-separated)
-            // Check for GitHub:Repo first, then fall back to GitHub:Dev:Repos or GitHub:Test:Repos
             var repoConfig = _configuration["GitHub:Repo"]
                 ?? _configuration["GitHub:Dev:Repos"]
                 ?? _configuration["GitHub:Test:Repos"]
@@ -565,7 +554,6 @@ public class GitHubService : IGitHubService
 
             var allPRs = new List<PullRequest>();
 
-            // Fetch PRs from all configured repos in parallel
             var tasks = repos.Select(async repo =>
             {
                 try
@@ -606,7 +594,6 @@ public class GitHubService : IGitHubService
         {
             var owner = _configuration["GitHub:Owner"];
 
-            // Support multiple repos - search through all to find the PR
             var repoConfig = _configuration["GitHub:Repo"]
                 ?? _configuration["GitHub:Dev:Repos"]
                 ?? _configuration["GitHub:Test:Repos"]
@@ -639,7 +626,6 @@ public class GitHubService : IGitHubService
         {
             var owner = _configuration["GitHub:Owner"];
 
-            // Support multiple repos - search through all to find the PR
             var repoConfig = _configuration["GitHub:Repo"]
                 ?? _configuration["GitHub:Dev:Repos"]
                 ?? _configuration["GitHub:Test:Repos"]
@@ -684,12 +670,10 @@ public class GitHubService : IGitHubService
                 return new List<TeamMember>();
             }
 
-            // Try to get organization members (requires org:read scope)
             var response = await _httpClient.GetAsync($"orgs/{owner}/members");
 
             if (!response.IsSuccessStatusCode)
             {
-                // Fallback: try to get collaborators from repos
                 _logger.LogWarning("Could not fetch org members (may need org:read scope), trying repo collaborators");
                 return await GetRepoCollaboratorsAsync(owner);
             }
@@ -699,7 +683,7 @@ public class GitHubService : IGitHubService
             {
                 Id = m.Id?.ToString() ?? "",
                 DisplayName = m.Login ?? "",
-                Email = m.Email, // Only use actual email, don't construct fake noreply
+                Email = m.Email,
                 UniqueName = m.Login,
                 AvatarUrl = m.AvatarUrl,
                 Source = "GitHub"
@@ -728,7 +712,7 @@ public class GitHubService : IGitHubService
 
             var allCollaborators = new Dictionary<string, TeamMember>();
 
-            foreach (var repo in repos.Take(3)) // Limit to first 3 repos to avoid rate limiting
+            foreach (var repo in repos.Take(3))
             {
                 var response = await _httpClient.GetAsync($"repos/{owner}/{repo}/collaborators");
                 if (response.IsSuccessStatusCode)
@@ -744,7 +728,7 @@ public class GitHubService : IGitHubService
                                 {
                                     Id = c.Id?.ToString() ?? "",
                                     DisplayName = c.Login,
-                                    Email = c.Email, // Only use actual email
+                                    Email = c.Email,
                                     UniqueName = c.Login,
                                     AvatarUrl = c.AvatarUrl,
                                     Source = "GitHub"
@@ -769,15 +753,13 @@ public class GitHubService : IGitHubService
         owner ??= _configuration["GitHub:Owner"];
         repo ??= _configuration["GitHub:Repo"];
 
-        // Only use actual email if available, don't construct fake noreply emails
         var authorEmail = pr.User?.Email;
 
-        // Map requested reviewers
         var reviewers = pr.RequestedReviewers?.Select(r => new PRReviewer
         {
             Id = r.Id?.ToString() ?? "",
             DisplayName = r.Login ?? "",
-            Email = r.Email, // Only use actual email
+            Email = r.Email,
             UniqueName = r.Login,
             AvatarUrl = r.AvatarUrl,
             Vote = ReviewVote.NoVote,
@@ -845,7 +827,8 @@ public class GitHubService : IGitHubService
         };
     }
 
-    // GitHub API response models - using JsonPropertyName to map snake_case JSON to PascalCase C#
+    #region Response Models
+
     private class GitHubPR
     {
         public long Id { get; set; }
@@ -884,6 +867,7 @@ public class GitHubService : IGitHubService
     }
 
     private class GitHubRef { public string? Ref { get; set; } }
+
     private class GitHubUser
     {
         public string? Login { get; set; }
@@ -906,4 +890,6 @@ public class GitHubService : IGitHubService
         public string? Path { get; set; }
         public int? Line { get; set; }
     }
+
+    #endregion
 }

@@ -158,10 +158,13 @@ cp secrets.config.json.template secrets.config.json
 | Feature | Description |
 |---------|-------------|
 | **Draft PRs** | Shows only PRs created by logged-in user |
-| **Story Points** | Current iteration, excludes Done/Closed |
+| **Story Points** | Current iteration, excludes Done/Closed. Supports both StoryPoints (Scrum) and Effort (Agile/CMMI) fields |
 | **Overdue PRs** | Alerts after 48 hours with email notification |
 | **Code Review** | Schedule Teams meeting with default reviewers |
 | **AI Assistant** | Azure OpenAI or GitHub Copilot |
+| **Pipeline Status** | Clickable builds with direct links to Azure DevOps. Environment-based filtering (Dev/Test) |
+| **Dual Auth** | Supports both PAT token and Entra ID authentication modes |
+| **Team Resolution** | Automatically resolves user's team membership for sprint filtering |
 
 ---
 
