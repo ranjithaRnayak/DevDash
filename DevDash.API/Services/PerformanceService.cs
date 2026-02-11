@@ -663,17 +663,18 @@ public class PerformanceService : IPerformanceService
 
             // Use @Me macro which works with PAT authentication
             // This is more reliable than using email address
+            // Select both StoryPoints (Scrum) and Effort (Agile/CMMI) fields
             var wiqlQuery = new
             {
                 query = $@"
-                    SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.WorkItemType]
+                    SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [Microsoft.VSTS.Scheduling.Effort], [System.WorkItemType]
                     FROM WorkItems
                     WHERE [System.TeamProject] = '{project}'
                     AND [System.AssignedTo] = @Me
                     AND [System.WorkItemType] IN ('Product Backlog Item', 'User Story', 'Bug')
                     AND [System.IterationPath] UNDER @CurrentIteration
                     AND [System.State] NOT IN ('Active', 'In Progress', 'Analysis', 'Doing', 'Resolved', 'Done', 'Closed', 'Removed')
-                    ORDER BY [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
+                    ORDER BY [Microsoft.VSTS.Scheduling.Effort] DESC, [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
             };
 
             _logger.LogInformation("WIQL Query: {Query}", wiqlQuery.query);
@@ -696,13 +697,13 @@ public class PerformanceService : IPerformanceService
                     new
                     {
                         query = $@"
-                            SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.WorkItemType]
+                            SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [Microsoft.VSTS.Scheduling.Effort], [System.WorkItemType]
                             FROM WorkItems
                             WHERE [System.TeamProject] = '{project}'
                             AND [System.AssignedTo] = @Me
                             AND [System.WorkItemType] IN ('Product Backlog Item', 'User Story', 'Bug')
                             AND [System.State] NOT IN ('Active', 'In Progress', 'Analysis', 'Doing', 'Resolved', 'Done', 'Closed', 'Removed')
-                            ORDER BY [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
+                            ORDER BY [Microsoft.VSTS.Scheduling.Effort] DESC, [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
                     });
 
                 if (!wiqlResponse.IsSuccessStatusCode)
@@ -726,9 +727,10 @@ public class PerformanceService : IPerformanceService
             }
 
             // Fetch work item details (batch of up to 200)
+            // Request both StoryPoints (Scrum) and Effort (Agile/CMMI) fields
             var idsToFetch = string.Join(",", workItemIds.Take(200));
             var detailsResponse = await _azDoClient.GetAsync(
-                $"{project}/_apis/wit/workitems?ids={idsToFetch}&fields=System.Id,System.Title,System.State,Microsoft.VSTS.Scheduling.StoryPoints,System.WorkItemType&api-version=7.0");
+                $"{project}/_apis/wit/workitems?ids={idsToFetch}&fields=System.Id,System.Title,System.State,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.WorkItemType&api-version=7.0");
 
             if (!detailsResponse.IsSuccessStatusCode)
             {
@@ -744,14 +746,18 @@ public class PerformanceService : IPerformanceService
                     Id = wi.Id,
                     Title = wi.Fields?.Title ?? "",
                     State = wi.Fields?.State ?? "",
-                    StoryPoints = wi.Fields?.StoryPoints ?? 0,
+                    // Use EffectivePoints which handles both StoryPoints (Scrum) and Effort (Agile/CMMI)
+                    StoryPoints = wi.Fields?.EffectivePoints ?? 0,
                     Type = wi.Fields?.WorkItemType ?? "",
                     Url = BuildAzDoWorkItemUrl(project, wi.Id)
                 })
                 .ToList() ?? new List<WorkItemInfo>();
 
-            // Sum story points (treat null as 0)
+            // Sum points (using EffectivePoints which handles both StoryPoints and Effort fields)
             var totalPoints = items.Sum(i => i.StoryPoints);
+
+            _logger.LogInformation("Work items processed: {Items}",
+                string.Join(", ", items.Select(i => $"#{i.Id}: {i.StoryPoints} pts")));
 
             _logger.LogInformation("Returning {Count} items with {Points} total story points", items.Count, totalPoints);
 
@@ -1322,8 +1328,17 @@ Scheduled via DevDash";
         [JsonPropertyName("Microsoft.VSTS.Scheduling.StoryPoints")]
         public double StoryPoints { get; set; }
 
+        [JsonPropertyName("Microsoft.VSTS.Scheduling.Effort")]
+        public double Effort { get; set; }
+
         [JsonPropertyName("System.WorkItemType")]
         public string? WorkItemType { get; set; }
+
+        /// <summary>
+        /// Gets the effective points value - uses Effort if StoryPoints is 0
+        /// This handles both Scrum (StoryPoints) and Agile/CMMI (Effort) templates
+        /// </summary>
+        public double EffectivePoints => StoryPoints > 0 ? StoryPoints : Effort;
     }
 
     private class GitHubUserResponse
