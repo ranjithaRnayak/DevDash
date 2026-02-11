@@ -377,4 +377,20 @@ public class DevOpsController : ControllerBase
             return StatusCode(500, new { error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Simple ping endpoint to verify code deployment - returns build timestamp
+    /// </summary>
+    [HttpGet("testplans/ping")]
+    [AllowAnonymous]
+    public ActionResult<object> PingTestPlans()
+    {
+        var buildTime = "2026-02-11T17:00:00Z"; // Update this timestamp to verify deployment
+        Console.WriteLine($"[DevOpsController] PING! Build time: {buildTime}");
+        return Ok(new {
+            message = "TestPlan endpoints are available",
+            buildTime = buildTime,
+            timestamp = DateTime.UtcNow
+        });
+    }
 }
