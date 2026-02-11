@@ -51,6 +51,9 @@ else
         .AddPATAuthentication();
 }
 
+// Add HttpContextAccessor for accessing user claims in services
+builder.Services.AddHttpContextAccessor();
+
 // ============================================
 // Feature Flags
 // ============================================

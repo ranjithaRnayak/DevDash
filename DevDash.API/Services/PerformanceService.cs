@@ -1,8 +1,10 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Http;
 
 namespace DevDash.API.Services;
 
@@ -32,6 +34,7 @@ public class PerformanceService : IPerformanceService
     private readonly IConfiguration _configuration;
     private readonly ICacheService _cacheService;
     private readonly ILogger<PerformanceService> _logger;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
     // Cached authenticated user info
     private AzDoUserInfo? _cachedUser;
@@ -40,7 +43,8 @@ public class PerformanceService : IPerformanceService
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ICacheService cacheService,
-        ILogger<PerformanceService> logger)
+        ILogger<PerformanceService> logger,
+        IHttpContextAccessor httpContextAccessor)
     {
         _azDoClient = httpClientFactory.CreateClient("AzureDevOps");
         _gitHubClient = httpClientFactory.CreateClient("GitHub");
@@ -48,6 +52,7 @@ public class PerformanceService : IPerformanceService
         _configuration = configuration;
         _cacheService = cacheService;
         _logger = logger;
+        _httpContextAccessor = httpContextAccessor;
 
         ConfigureClients();
     }
@@ -86,15 +91,24 @@ public class PerformanceService : IPerformanceService
     }
 
     /// <summary>
-    /// Get the authenticated Azure DevOps user by calling /_apis/connectionData
-    /// Returns a fallback user if API fails (PAT mode without valid Azure DevOps config)
+    /// Get the authenticated user based on authentication mode:
+    /// - PAT mode: Get user from Azure DevOps API using PAT token
+    /// - Entra ID mode: Get user from HTTP context claims
     /// </summary>
     public async Task<AzDoUserInfo> GetAuthenticatedAzDoUserAsync()
     {
-        // Check cache first
-        var cacheKey = "azdo:authenticated-user";
+        // Check if we're in PAT mode or Entra ID mode
+        var usePATToken = _configuration.GetValue<bool>("FeatureFlags:UsePATToken", false);
+        var authType = GetAuthTypeFromClaims();
+
+        _logger.LogInformation("Auth mode - UsePATToken: {UsePAT}, AuthType from claims: {AuthType}", usePATToken, authType);
+
+        // Build cache key based on auth context
+        var userId = GetUserIdFromClaims();
+        var cacheKey = $"azdo:authenticated-user:{userId ?? "default"}";
+
         var cached = await _cacheService.GetAsync<AzDoUserInfo>(cacheKey);
-        if (cached != null)
+        if (cached != null && cached.Id != "pat-user") // Don't return cached fallback
         {
             _logger.LogInformation("Returning cached user: {UserId}, {Email}", cached.Id, cached.Email);
             return cached;
@@ -102,60 +116,289 @@ public class PerformanceService : IPerformanceService
 
         try
         {
-            // Check if Azure DevOps is configured
-            var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
-            var pat = _configuration["AzureDevOps:PAT"];
+            AzDoUserInfo? userInfo = null;
 
-            if (string.IsNullOrEmpty(orgUrl) || string.IsNullOrEmpty(pat))
+            // If using Entra ID (not PAT mode), try to get user from claims first
+            if (!usePATToken && authType != "PAT")
             {
-                _logger.LogWarning("Azure DevOps not configured - returning fallback user");
-                return GetFallbackUser();
+                userInfo = await GetUserFromEntraIdClaimsAsync();
+                if (userInfo != null && userInfo.Id != "pat-user")
+                {
+                    _logger.LogInformation("Resolved user from Entra ID claims: {UserId}, {DisplayName}, {Email}",
+                        userInfo.Id, userInfo.DisplayName, userInfo.Email);
+                }
             }
 
-            _logger.LogInformation("Fetching authenticated user from: {BaseAddress}_apis/connectionData", _azDoClient.BaseAddress);
+            // If no user from claims or in PAT mode, get from Azure DevOps API
+            if (userInfo == null || userInfo.Id == "pat-user")
+            {
+                userInfo = await GetUserFromAzureDevOpsApiAsync();
+            }
+
+            if (userInfo != null && userInfo.Id != "pat-user")
+            {
+                // Cache for 30 minutes
+                await _cacheService.SetAsync(cacheKey, userInfo, TimeSpan.FromMinutes(30));
+                _cachedUser = userInfo;
+                return userInfo;
+            }
+
+            _logger.LogWarning("Could not resolve user from any source - returning fallback");
+            return GetFallbackUser();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get authenticated user");
+            return GetFallbackUser();
+        }
+    }
+
+    /// <summary>
+    /// Get user info from Entra ID claims (for Entra ID auth mode)
+    /// </summary>
+    private Task<AzDoUserInfo?> GetUserFromEntraIdClaimsAsync()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user?.Identity?.IsAuthenticated != true)
+        {
+            _logger.LogWarning("User is not authenticated via HTTP context");
+            return Task.FromResult<AzDoUserInfo?>(null);
+        }
+
+        // Extract claims from Entra ID token
+        var objectId = user.FindFirst("oid")?.Value // Azure AD Object ID
+                       ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var email = user.FindFirst(ClaimTypes.Email)?.Value
+                    ?? user.FindFirst("email")?.Value
+                    ?? user.FindFirst("preferred_username")?.Value
+                    ?? user.FindFirst(ClaimTypes.Upn)?.Value;
+        var name = user.FindFirst(ClaimTypes.Name)?.Value
+                   ?? user.FindFirst("name")?.Value;
+
+        _logger.LogInformation("Entra ID claims - ObjectId: {ObjectId}, Email: {Email}, Name: {Name}",
+            objectId, email, name);
+
+        if (string.IsNullOrEmpty(objectId) && string.IsNullOrEmpty(email))
+        {
+            return Task.FromResult<AzDoUserInfo?>(null);
+        }
+
+        var userInfo = new AzDoUserInfo
+        {
+            Id = objectId ?? email ?? "",
+            DisplayName = name ?? email ?? "",
+            Email = email ?? "",
+            UniqueName = email ?? ""
+        };
+
+        return Task.FromResult<AzDoUserInfo?>(userInfo);
+    }
+
+    /// <summary>
+    /// Get user info from Azure DevOps API using PAT token
+    /// </summary>
+    private async Task<AzDoUserInfo?> GetUserFromAzureDevOpsApiAsync()
+    {
+        var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
+        var pat = _configuration["AzureDevOps:PAT"];
+
+        if (string.IsNullOrEmpty(orgUrl) || string.IsNullOrEmpty(pat))
+        {
+            _logger.LogWarning("Azure DevOps not configured - cannot resolve user");
+            return null;
+        }
+
+        // Try connectionData API first
+        var userInfo = await TryGetUserFromConnectionDataAsync();
+        if (userInfo != null)
+        {
+            return userInfo;
+        }
+
+        // Try profile API as fallback
+        userInfo = await TryGetUserFromProfileApiAsync();
+        return userInfo;
+    }
+
+    /// <summary>
+    /// Try to get user from Azure DevOps connectionData API
+    /// </summary>
+    private async Task<AzDoUserInfo?> TryGetUserFromConnectionDataAsync()
+    {
+        try
+        {
+            _logger.LogInformation("Fetching user from connectionData API: {BaseAddress}_apis/connectionData", _azDoClient.BaseAddress);
             var response = await _azDoClient.GetAsync("_apis/connectionData?api-version=7.0");
 
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("ConnectionData API returned {StatusCode}", response.StatusCode);
-                return GetFallbackUser();
+                return null;
             }
 
             var content = await response.Content.ReadAsStringAsync();
-            _logger.LogInformation("ConnectionData response (first 500 chars): {Content}",
-                content.Length > 500 ? content.Substring(0, 500) : content);
+            _logger.LogDebug("ConnectionData response: {Content}",
+                content.Length > 1000 ? content.Substring(0, 1000) : content);
 
-            var data = System.Text.Json.JsonSerializer.Deserialize<ConnectionDataResponse>(content,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            var data = JsonSerializer.Deserialize<ConnectionDataResponse>(content,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (data?.AuthenticatedUser == null)
             {
-                _logger.LogWarning("Could not resolve authenticated user from Azure DevOps - returning fallback");
-                return GetFallbackUser();
+                _logger.LogWarning("No authenticated user in connectionData response");
+                return null;
             }
+
+            // Extract email from various possible locations in the response
+            var email = ExtractEmailFromConnectionData(data.AuthenticatedUser);
 
             var userInfo = new AzDoUserInfo
             {
                 Id = data.AuthenticatedUser.Id,
-                DisplayName = data.AuthenticatedUser.ProviderDisplayName ?? data.AuthenticatedUser.DisplayName ?? "",
-                Email = data.AuthenticatedUser.Properties?.Account?.FirstOrDefault() ?? data.AuthenticatedUser.UniqueName ?? "",
-                UniqueName = data.AuthenticatedUser.UniqueName ?? ""
+                DisplayName = data.AuthenticatedUser.ProviderDisplayName
+                              ?? data.AuthenticatedUser.DisplayName
+                              ?? "",
+                Email = email,
+                UniqueName = data.AuthenticatedUser.UniqueName ?? email
             };
 
-            _logger.LogInformation("Resolved authenticated user: {UserId}, {DisplayName}, {Email}",
+            _logger.LogInformation("Resolved user from connectionData: {UserId}, {DisplayName}, {Email}",
                 userInfo.Id, userInfo.DisplayName, userInfo.Email);
-
-            // Cache for 30 minutes
-            await _cacheService.SetAsync(cacheKey, userInfo, TimeSpan.FromMinutes(30));
-            _cachedUser = userInfo;
 
             return userInfo;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get authenticated Azure DevOps user - returning fallback");
-            return GetFallbackUser();
+            _logger.LogError(ex, "Error fetching user from connectionData API");
+            return null;
         }
+    }
+
+    /// <summary>
+    /// Extract email from various locations in connection data response
+    /// </summary>
+    private string ExtractEmailFromConnectionData(AuthenticatedUserInfo user)
+    {
+        // Try Properties.Account first (array of emails)
+        if (user.Properties?.Account != null && user.Properties.Account.Count > 0)
+        {
+            var email = user.Properties.Account.FirstOrDefault();
+            if (!string.IsNullOrEmpty(email))
+                return email;
+        }
+
+        // Try UniqueName (often contains email)
+        if (!string.IsNullOrEmpty(user.UniqueName))
+        {
+            return user.UniqueName;
+        }
+
+        // Try CustomDisplayName
+        if (!string.IsNullOrEmpty(user.CustomDisplayName))
+        {
+            return user.CustomDisplayName;
+        }
+
+        return "";
+    }
+
+    /// <summary>
+    /// Try to get user from Azure DevOps profile API
+    /// </summary>
+    private async Task<AzDoUserInfo?> TryGetUserFromProfileApiAsync()
+    {
+        try
+        {
+            // Profile API requires vssps.dev.azure.com endpoint
+            var orgUrl = _configuration["AzureDevOps:OrganizationUrl"];
+            if (string.IsNullOrEmpty(orgUrl))
+                return null;
+
+            // Extract organization name from URL
+            var uri = new Uri(orgUrl);
+            string? orgName = null;
+
+            if (uri.Host.Contains("dev.azure.com"))
+            {
+                orgName = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            }
+            else if (uri.Host.Contains(".visualstudio.com"))
+            {
+                orgName = uri.Host.Split('.').FirstOrDefault();
+            }
+
+            if (string.IsNullOrEmpty(orgName))
+            {
+                _logger.LogWarning("Could not extract organization name from URL");
+                return null;
+            }
+
+            // Create profile API client
+            var pat = _configuration["AzureDevOps:PAT"];
+            var profileUrl = $"https://vssps.dev.azure.com/{orgName}/_apis/profile/profiles/me?api-version=7.0";
+
+            using var profileClient = new HttpClient();
+            var credentials = Convert.ToBase64String(Encoding.ASCII.GetBytes($":{pat}"));
+            profileClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", credentials);
+
+            _logger.LogInformation("Fetching user from profile API: {Url}", profileUrl);
+            var response = await profileClient.GetAsync(profileUrl);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Profile API returned {StatusCode}", response.StatusCode);
+                return null;
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            _logger.LogDebug("Profile API response: {Content}",
+                content.Length > 500 ? content.Substring(0, 500) : content);
+
+            var profile = JsonSerializer.Deserialize<ProfileResponse>(content,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (profile == null)
+            {
+                return null;
+            }
+
+            var userInfo = new AzDoUserInfo
+            {
+                Id = profile.Id ?? profile.PublicAlias ?? "",
+                DisplayName = profile.DisplayName ?? "",
+                Email = profile.EmailAddress ?? "",
+                UniqueName = profile.EmailAddress ?? ""
+            };
+
+            _logger.LogInformation("Resolved user from profile API: {UserId}, {DisplayName}, {Email}",
+                userInfo.Id, userInfo.DisplayName, userInfo.Email);
+
+            return userInfo;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching user from profile API");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Get auth type from HTTP context claims
+    /// </summary>
+    private string GetAuthTypeFromClaims()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        return user?.FindFirst("auth_type")?.Value ?? "unknown";
+    }
+
+    /// <summary>
+    /// Get user ID from HTTP context claims for cache key
+    /// </summary>
+    private string? GetUserIdFromClaims()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        return user?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+               ?? user?.FindFirst("oid")?.Value;
     }
 
     private AzDoUserInfo GetFallbackUser()
@@ -167,6 +410,73 @@ public class PerformanceService : IPerformanceService
             Email = "pat-user@local",
             UniqueName = "pat-user"
         };
+    }
+
+    /// <summary>
+    /// Get the team name for a user by finding which team they belong to
+    /// </summary>
+    private async Task<string?> GetUserTeamNameAsync(AzDoUserInfo user)
+    {
+        try
+        {
+            // Check cache first
+            var cacheKey = $"azdo:user-team:{user.Id}";
+            var cachedTeam = await _cacheService.GetAsync<string>(cacheKey);
+            if (!string.IsNullOrEmpty(cachedTeam))
+            {
+                _logger.LogDebug("Returning cached team for user {UserId}: {Team}", user.Id, cachedTeam);
+                return cachedTeam;
+            }
+
+            var project = _configuration["AzureDevOps:Project"];
+
+            // Get all teams in the project
+            var teamsResponse = await _azDoClient.GetAsync($"_apis/projects/{project}/teams?api-version=7.0");
+            if (!teamsResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to fetch teams: {StatusCode}", teamsResponse.StatusCode);
+                return null;
+            }
+
+            var teamsResult = await teamsResponse.Content.ReadFromJsonAsync<TeamsListResponse>();
+            var teams = teamsResult?.Value ?? new List<TeamInfo>();
+
+            // Find which team the user belongs to
+            foreach (var team in teams)
+            {
+                var membersResponse = await _azDoClient.GetAsync(
+                    $"_apis/projects/{project}/teams/{team.Id}/members?api-version=7.0");
+
+                if (!membersResponse.IsSuccessStatusCode)
+                    continue;
+
+                var membersResult = await membersResponse.Content.ReadFromJsonAsync<TeamMembersListResponse>();
+                var members = membersResult?.Value ?? new List<TeamMemberItem>();
+
+                // Check if current user is in this team
+                var userMember = members.FirstOrDefault(m =>
+                    string.Equals(m.Identity?.Id, user.Id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.Identity?.UniqueName, user.Email, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(m.Identity?.UniqueName, user.UniqueName, StringComparison.OrdinalIgnoreCase));
+
+                if (userMember != null && !string.IsNullOrEmpty(team.Name))
+                {
+                    _logger.LogInformation("Found user {UserId} in team {TeamName}", user.Id, team.Name);
+
+                    // Cache for 1 hour
+                    await _cacheService.SetAsync(cacheKey, team.Name, TimeSpan.FromHours(1));
+                    return team.Name;
+                }
+            }
+
+            _logger.LogWarning("User {UserId} not found in any team", user.Id);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting team name for user {UserId}", user.Id);
+            return null;
+        }
     }
 
     /// <summary>
@@ -332,39 +642,84 @@ public class PerformanceService : IPerformanceService
     /// </summary>
     public async Task<StoryPointsSummary> GetMyStoryPointsAsync()
     {
+        _logger.LogInformation("=== GetMyStoryPointsAsync STARTED ===");
+
         try
         {
             var user = await GetAuthenticatedAzDoUserAsync();
             var project = _configuration["AzureDevOps:Project"];
+            _logger.LogInformation("Story Points - Got user {UserId}, project: {Project}", user.Id, project);
 
-            // WIQL query for PBIs/User Stories only (exclude Tasks)
-            // Filter for items assigned to current user, in current sprint, not started
+            // Try to get team name from user's team membership
+            var team = await GetUserTeamNameAsync(user);
+            if (string.IsNullOrEmpty(team))
+            {
+                // Fallback to config or default
+                team = _configuration["AzureDevOps:Team"] ?? $"{project} Team";
+            }
+
+            _logger.LogInformation("Fetching story points - User: {UserId}/{Email}, Project: {Project}, Team: {Team}",
+                user.Id, user.Email, project, team);
+
+            // Use @Me macro which works with PAT authentication
+            // This is more reliable than using email address
+            // Select both StoryPoints (Scrum) and Effort (Agile/CMMI) fields
             var wiqlQuery = new
             {
                 query = $@"
-                    SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [System.WorkItemType]
+                    SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [Microsoft.VSTS.Scheduling.Effort], [System.WorkItemType]
                     FROM WorkItems
                     WHERE [System.TeamProject] = '{project}'
-                    AND [System.AssignedTo] = '{user.Email}'
-                    AND [System.WorkItemType] IN ('Product Backlog Item', 'User Story')
+                    AND [System.AssignedTo] = @Me
+                    AND [System.WorkItemType] IN ('Product Backlog Item', 'User Story', 'Bug')
                     AND [System.IterationPath] UNDER @CurrentIteration
-                    AND [System.State] NOT IN ('Done', 'Closed', 'Removed')
-                    AND [System.State] IN ('New', 'To Do', 'Approved', 'Committed')
-                    ORDER BY [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
+                    AND [System.State] NOT IN ('Active', 'In Progress', 'Analysis', 'Doing', 'Resolved', 'Done', 'Closed', 'Removed')
+                    ORDER BY [Microsoft.VSTS.Scheduling.Effort] DESC, [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
             };
 
-            var wiqlResponse = await _azDoClient.PostAsJsonAsync(
-                $"{project}/_apis/wit/wiql?api-version=7.0",
-                wiqlQuery);
+            _logger.LogInformation("WIQL Query: {Query}", wiqlQuery.query);
+
+            // Use team in the WIQL endpoint for @CurrentIteration macro to work
+            var wiqlUrl = $"{project}/{Uri.EscapeDataString(team)}/_apis/wit/wiql?api-version=7.0";
+            _logger.LogInformation("WIQL URL: {Url}", wiqlUrl);
+
+            var wiqlResponse = await _azDoClient.PostAsJsonAsync(wiqlUrl, wiqlQuery);
 
             if (!wiqlResponse.IsSuccessStatusCode)
             {
-                _logger.LogWarning("WIQL query failed: {Status}", wiqlResponse.StatusCode);
-                return new StoryPointsSummary();
+                var errorContent = await wiqlResponse.Content.ReadAsStringAsync();
+                _logger.LogWarning("WIQL query failed: {Status}, Error: {Error}", wiqlResponse.StatusCode, errorContent);
+
+                // Fallback: Try without @CurrentIteration filter
+                _logger.LogInformation("Trying fallback query without sprint filter...");
+                wiqlResponse = await _azDoClient.PostAsJsonAsync(
+                    $"{project}/_apis/wit/wiql?api-version=7.0",
+                    new
+                    {
+                        query = $@"
+                            SELECT [System.Id], [System.Title], [System.State], [Microsoft.VSTS.Scheduling.StoryPoints], [Microsoft.VSTS.Scheduling.Effort], [System.WorkItemType]
+                            FROM WorkItems
+                            WHERE [System.TeamProject] = '{project}'
+                            AND [System.AssignedTo] = @Me
+                            AND [System.WorkItemType] IN ('Product Backlog Item', 'User Story', 'Bug')
+                            AND [System.State] NOT IN ('Active', 'In Progress', 'Analysis', 'Doing', 'Resolved', 'Done', 'Closed', 'Removed')
+                            ORDER BY [Microsoft.VSTS.Scheduling.Effort] DESC, [Microsoft.VSTS.Scheduling.StoryPoints] DESC"
+                    });
+
+                if (!wiqlResponse.IsSuccessStatusCode)
+                {
+                    var fallbackError = await wiqlResponse.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Fallback WIQL query also failed: {Status}, Error: {Error}",
+                        wiqlResponse.StatusCode, fallbackError);
+                    return new StoryPointsSummary();
+                }
             }
 
             var wiqlResult = await wiqlResponse.Content.ReadFromJsonAsync<WiqlResponse>();
             var workItemIds = wiqlResult?.WorkItems?.Select(wi => wi.Id).ToList() ?? new List<int>();
+
+            _logger.LogInformation("WIQL returned {Count} work items: [{Ids}]",
+                workItemIds.Count, string.Join(", ", workItemIds.Take(10)));
 
             if (workItemIds.Count == 0)
             {
@@ -372,12 +727,14 @@ public class PerformanceService : IPerformanceService
             }
 
             // Fetch work item details (batch of up to 200)
+            // Request both StoryPoints (Scrum) and Effort (Agile/CMMI) fields
             var idsToFetch = string.Join(",", workItemIds.Take(200));
             var detailsResponse = await _azDoClient.GetAsync(
-                $"{project}/_apis/wit/workitems?ids={idsToFetch}&fields=System.Id,System.Title,System.State,Microsoft.VSTS.Scheduling.StoryPoints,System.WorkItemType&api-version=7.0");
+                $"{project}/_apis/wit/workitems?ids={idsToFetch}&fields=System.Id,System.Title,System.State,Microsoft.VSTS.Scheduling.StoryPoints,Microsoft.VSTS.Scheduling.Effort,System.WorkItemType&api-version=7.0");
 
             if (!detailsResponse.IsSuccessStatusCode)
             {
+                _logger.LogWarning("Work item details fetch failed: {Status}", detailsResponse.StatusCode);
                 return new StoryPointsSummary();
             }
 
@@ -389,14 +746,20 @@ public class PerformanceService : IPerformanceService
                     Id = wi.Id,
                     Title = wi.Fields?.Title ?? "",
                     State = wi.Fields?.State ?? "",
-                    StoryPoints = wi.Fields?.StoryPoints ?? 0,
+                    // Use EffectivePoints which handles both StoryPoints (Scrum) and Effort (Agile/CMMI)
+                    StoryPoints = wi.Fields?.EffectivePoints ?? 0,
                     Type = wi.Fields?.WorkItemType ?? "",
                     Url = BuildAzDoWorkItemUrl(project, wi.Id)
                 })
                 .ToList() ?? new List<WorkItemInfo>();
 
-            // Sum story points (treat null as 0)
+            // Sum points (using EffectivePoints which handles both StoryPoints and Effort fields)
             var totalPoints = items.Sum(i => i.StoryPoints);
+
+            _logger.LogInformation("Work items processed: {Items}",
+                string.Join(", ", items.Select(i => $"#{i.Id}: {i.StoryPoints} pts")));
+
+            _logger.LogInformation("Returning {Count} items with {Points} total story points", items.Count, totalPoints);
 
             return new StoryPointsSummary
             {
@@ -821,6 +1184,7 @@ Scheduled via DevDash";
         public string Id { get; set; } = "";
         public string? DisplayName { get; set; }
         public string? ProviderDisplayName { get; set; }
+        public string? CustomDisplayName { get; set; }
         public string? UniqueName { get; set; }
         public AuthUserProperties? Properties { get; set; }
     }
@@ -828,6 +1192,14 @@ Scheduled via DevDash";
     private class AuthUserProperties
     {
         public List<string>? Account { get; set; }
+    }
+
+    private class ProfileResponse
+    {
+        public string? Id { get; set; }
+        public string? PublicAlias { get; set; }
+        public string? DisplayName { get; set; }
+        public string? EmailAddress { get; set; }
     }
 
     private class AzDoPRListResponse
@@ -956,8 +1328,17 @@ Scheduled via DevDash";
         [JsonPropertyName("Microsoft.VSTS.Scheduling.StoryPoints")]
         public double StoryPoints { get; set; }
 
+        [JsonPropertyName("Microsoft.VSTS.Scheduling.Effort")]
+        public double Effort { get; set; }
+
         [JsonPropertyName("System.WorkItemType")]
         public string? WorkItemType { get; set; }
+
+        /// <summary>
+        /// Gets the effective points value - uses Effort if StoryPoints is 0
+        /// This handles both Scrum (StoryPoints) and Agile/CMMI (Effort) templates
+        /// </summary>
+        public double EffectivePoints => StoryPoints > 0 ? StoryPoints : Effort;
     }
 
     private class GitHubUserResponse

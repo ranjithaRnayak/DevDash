@@ -578,6 +578,9 @@ input:checked + .slider {
 /* ====================== */
 .performance-card {
     position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
 }
 
 .perf-header {
@@ -706,9 +709,12 @@ input:checked + .slider {
 .perf-scroll {
     max-height: 350px;
     overflow-y: auto;
+    overflow-x: hidden;
     padding-right: 6px;
     scrollbar-width: thin;
     scrollbar-color: #3b82f6 #1a1e2e;
+    flex: 1;
+    min-height: 0;
 }
 
 .perf-scroll::-webkit-scrollbar {
@@ -728,6 +734,8 @@ input:checked + .slider {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    width: 100%;
+    overflow: hidden;
 }
 
 .perf-item {
@@ -740,6 +748,9 @@ input:checked + .slider {
     border-radius: 10px;
     cursor: pointer;
     transition: all 0.2s ease;
+    width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
 }
 
 .perf-item:hover {
@@ -751,6 +762,7 @@ input:checked + .slider {
 .item-content {
     flex: 1;
     min-width: 0;
+    overflow: hidden;
 }
 
 .item-header {
@@ -759,6 +771,8 @@ input:checked + .slider {
     align-items: flex-start;
     gap: 12px;
     margin-bottom: 8px;
+    width: 100%;
+    overflow: hidden;
 }
 
 .item-title {
@@ -771,6 +785,7 @@ input:checked + .slider {
     text-overflow: ellipsis;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
 }
 
