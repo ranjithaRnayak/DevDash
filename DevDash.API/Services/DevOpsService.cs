@@ -93,7 +93,7 @@ public class AzureDevOpsService : IDevOpsService
                 }
             }
 
-            var fetchCount = pipelineNames.Count > 0 ? count * 3 : count;
+            var fetchCount = pipelineNames.Count > 0 ? count * 5 : count;
             var url = $"{project}/_apis/build/builds?$top={fetchCount}&api-version=7.0";
             _logger.LogInformation("Builds API: BaseAddress={BaseAddress}, URL={Url}, Environment={Env}, Pipelines={Pipelines}",
                 _httpClient.BaseAddress, url, environment, string.Join(",", pipelineNames));
@@ -112,10 +112,11 @@ public class AzureDevOpsService : IDevOpsService
             List<PipelineBuild> builds;
             if (pipelineNames.Count > 0)
             {
+                // Don't apply .Take(count) after filtering - show all matching builds
+                // since filtering already limits to configured pipelines
                 builds = allBuilds
                     .Where(b => pipelineNames.Any(p =>
                         b.PipelineName?.Contains(p, StringComparison.OrdinalIgnoreCase) == true))
-                    .Take(count)
                     .ToList();
                 _logger.LogInformation("Filtered to {FilteredCount} builds matching pipelines: {Pipelines}",
                     builds.Count, string.Join(",", pipelineNames));
