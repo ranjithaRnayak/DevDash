@@ -41,8 +41,14 @@ class AuthService {
   }
 
   getStoredUser() {
-    const userStr = localStorage.getItem(AUTH_USER_KEY);
-    return userStr ? JSON.parse(userStr) : null;
+    try {
+      const userStr = localStorage.getItem(AUTH_USER_KEY);
+      return userStr ? JSON.parse(userStr) : null;
+    } catch {
+      // If user data is corrupted, clear it and return null
+      localStorage.removeItem(AUTH_USER_KEY);
+      return null;
+    }
   }
 
   setAuthData(token, user) {

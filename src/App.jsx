@@ -33,7 +33,11 @@ const AuthenticatedDashboardContent = () => {
     const [showGitHubModal, setShowGitHubModal] = useState(false);
 
     const handleLogout = async () => {
-        await logout();
+        try {
+            await logout();
+        } catch (err) {
+            console.error('Logout failed:', err.message);
+        }
     };
 
     return (
