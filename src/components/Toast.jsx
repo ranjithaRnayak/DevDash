@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import { clearDismissedActivities } from '../utils/notificationStorage';
 
 const ToastContext = createContext(null);
 
@@ -25,17 +26,26 @@ export function ToastProvider({ children }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const resetNotifications = useCallback(() => {
+    clearDismissedActivities();
+  }, []);
+
   return (
-    <ToastContext.Provider value={{ addToast, removeToast }}>
+    <ToastContext.Provider value={{ addToast, removeToast, resetNotifications }}>
       {children}
-      <ToastContainer toasts={toasts} removeToast={removeToast} />
+      <ToastContainer toasts={toasts} removeToast={removeToast} onReset={resetNotifications} />
     </ToastContext.Provider>
   );
 }
 
-function ToastContainer({ toasts, removeToast }) {
+function ToastContainer({ toasts, removeToast, onReset }) {
   return (
     <div style={styles.container}>
+      {toasts.length === 0 && (
+        <button onClick={onReset} style={styles.resetButton} title="Show dismissed team notifications">
+          🔔 Reset Notifications
+        </button>
+      )}
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={() => removeToast(toast.id)} />
       ))}
@@ -177,6 +187,20 @@ const styles = {
     padding: '6px 12px',
     fontSize: '12px',
     cursor: 'pointer',
+  },
+  resetButton: {
+    background: '#1e1e1e',
+    color: '#888',
+    border: '1px solid #333',
+    borderRadius: '8px',
+    padding: '8px 16px',
+    fontSize: '12px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    opacity: 0.7,
+    transition: 'opacity 0.2s, background 0.2s',
   },
 };
 
