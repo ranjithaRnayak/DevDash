@@ -10,7 +10,7 @@ namespace DevDash.API.Services;
 /// </summary>
 public interface IDevOpsService
 {
-    Task<List<PipelineBuild>> GetRecentBuildsAsync(int count = 10, string? environment = null);
+    Task<List<PipelineBuild>> GetRecentBuildsAsync(int count = 20, string? environment = null);
     Task<PipelineBuild?> GetBuildAsync(string buildId);
     Task<List<PullRequest>> GetPullRequestsAsync(PRStatus? status = null);
     Task<string?> GetBuildLogsAsync(string buildId);
@@ -70,7 +70,7 @@ public class AzureDevOpsService : IDevOpsService
         }
     }
 
-    public async Task<List<PipelineBuild>> GetRecentBuildsAsync(int count = 10, string? environment = null)
+    public async Task<List<PipelineBuild>> GetRecentBuildsAsync(int count = 20, string? environment = null)
     {
         var cacheKey = $"azdo:builds:recent:{count}:{environment ?? "all"}";
         var cached = await _cacheService.GetAsync<List<PipelineBuild>>(cacheKey);
@@ -93,7 +93,8 @@ public class AzureDevOpsService : IDevOpsService
                 }
             }
 
-            var fetchCount = pipelineNames.Count > 0 ? count * 5 : count;
+            var fetchMultiplier = _configuration.GetValue<int>("AzureDevOps:FetchMultiplier", 5);
+            var fetchCount = pipelineNames.Count > 0 ? count * fetchMultiplier : count;
             var url = $"{project}/_apis/build/builds?$top={fetchCount}&api-version=7.0";
             _logger.LogInformation("Builds API: BaseAddress={BaseAddress}, URL={Url}, Environment={Env}, Pipelines={Pipelines}",
                 _httpClient.BaseAddress, url, environment, string.Join(",", pipelineNames));
