@@ -55,7 +55,7 @@ const AIAssistant = ({ dashboardId = 'dev' }) => {
             const response = await copilotAPI.getStatus();
             setCopilotEnabled(response.data.enabled && response.data.configured);
         } catch (err) {
-            console.log('Copilot not available:', err.message);
+            console.error('Copilot not available:', err.message);
         }
     };
 
@@ -64,7 +64,7 @@ const AIAssistant = ({ dashboardId = 'dev' }) => {
             const response = await copilotAPI.getContext(dashboardId);
             setCopilotContext(response.data);
         } catch (err) {
-            console.log('Failed to fetch Copilot context:', err.message);
+            console.error('Failed to fetch Copilot context:', err.message);
         }
     };
 
